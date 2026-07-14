@@ -1,0 +1,65 @@
+/* Custom styles for Grant's Website */
+
+/* Smooth scrolling for anchor links */
+html {
+  scroll-behavior: smooth;
+}
+
+/* Better focus states for accessibility */
+a:focus-visible,
+button:focus-visible,
+input:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid #3b82f6;
+  outline-offset: 2px;
+}
+
+/* Navbar background transition when scrolled */
+#navbar {
+  transition: background-color 0.3s ease, border-color 0.3s ease;
+}
+
+/* Form input styles */
+input, textarea {
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+input:focus, textarea:focus {
+  box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.1);
+}
+
+/* Project card improvements */
+.card-hover {
+  border-color: #1e2937;
+}
+
+.card-hover:hover {
+  border-color: #334155;
+}
+
+/* Mobile menu animation */
+#mobile-menu {
+  animation: slideDown 0.2s ease forwards;
+}
+
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Small polish for buttons */
+button, a[href] {
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Make sure text selection is nice */
+::selection {
+  background-color: #1e40af;
+  color: white;
+}

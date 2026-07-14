@@ -1,0 +1,615 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Pick Your Path Stories</title>
+  <link rel="stylesheet" href="/css/tailwind.css">
+
+  <!-- Google AdSense script for limited ads on FREE stories only.
+       Revenue goes 100% to your AdSense account (platform), not creators.
+       Steps:
+       1. Sign up / apply at https://www.google.com/adsense/
+       2. Verify your site (add meta tag or file upload)
+       3. Create ad unit(s) - recommend "In-article" or "Display" responsive, limited placements
+       4. Get your ca-pub-XXXX client ID and ad slot ID
+       5. Uncomment the script below, replace YOUR_PUBLISHER_ID
+       6. Update the data-ad- values in the JS ad injection in app.js
+       Ads will only appear on free (price=0) stories for non-owners, only on the first page.
+  -->
+  <!-- <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-YOUR_PUBLISHER_ID"
+          crossorigin="anonymous"></script> -->
+
+  <style>
+    :root { --accent: #3b82f6; }
+    body { font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    
+    .nav-scrolled { background-color: rgba(15, 23, 42, 0.96); backdrop-filter: blur(12px); }
+    
+    .comic-card {
+      transition: transform .15s cubic-bezier(0.4,0,.2,1), box-shadow .15s;
+    }
+    .comic-card:hover {
+      transform: translateY(-4px);
+      box-shadow: 0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1);
+    }
+
+    .choice-btn {
+      transition: all 0.1s ease;
+    }
+    .choice-btn:hover {
+      background-color: #1e2937;
+      transform: translateX(4px);
+    }
+
+    .page-image {
+      background-size: contain;
+      background-position: center;
+      background-repeat: no-repeat;
+      background-color: #0f172a;
+    }
+
+    .section-header {
+      position: relative;
+      display: inline-block;
+    }
+    .section-header:after {
+      content: '';
+      position: absolute;
+      bottom: -6px; left: 0;
+      width: 50%;
+      height: 3px;
+      background: linear-gradient(to right, #3b82f6, transparent);
+      border-radius: 3px;
+    }
+
+    .modal {
+      animation: fadeInScale 0.15s ease forwards;
+    }
+    @keyframes fadeInScale {
+      from { opacity: 0; transform: scale(0.96); }
+      to { opacity: 1; transform: scale(1); }
+    }
+
+    .cyoa-container {
+      max-width: 820px;
+      margin: 0 auto;
+    }
+
+    .story-text {
+      font-size: 1.05rem;
+      line-height: 1.7;
+    }
+
+    /* Ensure modals and tabbed content stay hidden until JS shows them.
+       This protects against parse issues or CSS load order. */
+    .hidden {
+      display: none !important;
+    }
+
+    /* Mobile-friendly overrides (works without Tailwind rebuild) */
+    @media (max-width: 640px) {
+      .story-text {
+        font-size: 1rem !important;
+        line-height: 1.55 !important;
+      }
+      .choice-btn {
+        min-height: 44px;
+      }
+      /* Navbar */
+      #navbar .h-14, #navbar .h-16 { height: 3.5rem; }
+      /* Hero */
+      #home-hero h1 { font-size: 1.75rem !important; line-height: 1.1; }
+      /* Reader: make back button stack nicely */
+      #reader-choices-row {
+        flex-direction: column;
+      }
+      #reader-choices-row > button {
+        width: 100% !important;
+        min-width: auto !important;
+        min-height: 36px !important;
+        margin-bottom: 4px;
+      }
+      /* Editor header */
+      #editor-section > div.mb-4 > div {
+        flex-direction: column !important;
+        align-items: flex-start !important;
+      }
+      /* Pages list in editor - prevent bunching */
+      #pages-list > div {
+        font-size: 0.8rem;
+      }
+      #pages-list > div > div:last-child {
+        min-width: 52px;
+      }
+      /* Smaller card thumbs in browse */
+      .comic-card .h-32, .comic-card .h-40 {
+        height: 7rem !important;
+      }
+      /* General tighter padding */
+      .max-w-6xl { padding-left: 0.75rem; padding-right: 0.75rem; }
+      /* Full page reader/editor below smaller mobile navbar */
+      #reader-modal, #create-modal {
+        top: 3.5rem !important;
+      }
+    }
+  </style>
+</head>
+<body class="bg-slate-950 text-slate-200">
+  <!-- Navbar -->
+  <nav id="navbar" class="fixed top-0 left-0 right-0 z-50 border-b border-slate-800 bg-slate-950">
+    <div class="max-w-6xl mx-auto px-4 sm:px-6">
+      <div class="flex items-center justify-between h-14 sm:h-16">
+        <div class="flex items-center gap-2 sm:gap-3">
+          <div onclick="showHome()" class="flex items-center gap-2 cursor-pointer">
+            <div class="w-7 h-7 sm:w-8 sm:h-8 bg-blue-600 rounded-xl flex items-center justify-center">
+              <span class="font-bold text-white text-[10px] sm:text-xs tracking-tighter">PYP</span>
+            </div>
+            <span class="font-semibold text-lg sm:text-xl tracking-tight">
+              <span class="sm:hidden">PYP</span>
+              <span class="hidden sm:inline">Pick Your Path</span>
+            </span>
+          </div>
+          <div class="hidden md:flex items-center gap-1 text-sm text-slate-400 ml-2">
+            <span class="px-2 py-0.5 bg-slate-900 rounded">PYPStories.com</span>
+          </div>
+        </div>
+
+        <div class="flex items-center gap-1 sm:gap-2 text-xs sm:text-sm">
+          <button onclick="showBrowse()" 
+                  class="px-2 sm:px-3 py-0.5 sm:py-1 rounded-xl hover:bg-slate-900 transition-colors">Browse</button>
+          
+          <button id="my-comics-btn" onclick="showMyComics()" 
+                  class="hidden px-2 sm:px-3 py-0.5 sm:py-1 rounded-xl hover:bg-slate-900 transition-colors">My Stories</button>
+
+          <div id="auth-section">
+            <!-- default login button for mobile/static fallback; JS will replace with correct state -->
+            <button onclick="showAuthModal()" class="px-3 sm:px-5 py-1 sm:py-1.5 text-xs sm:text-sm font-medium bg-white text-slate-900 rounded-2xl hover:bg-slate-100">Log in</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </nav>
+
+  <!-- Main Content -->
+  <div class="pt-14 sm:pt-16">
+    <!-- CATALOG (Home with hero, or Browse without hero) -->
+    <div id="view-catalog">
+      <div class="max-w-6xl mx-auto px-4 sm:px-6 py-8 sm:py-10">
+        <!-- Hero — home only -->
+        <div id="home-hero" class="mb-10">
+          <h1 class="text-4xl sm:text-5xl md:text-6xl lg:text-7xl font-semibold tracking-tighter mb-3">Pick your path.<br>Every choice writes the story.</h1>
+          <p class="text-base sm:text-lg md:text-xl text-slate-400 max-w-xl">Discover and create your own branching stories. Upload pages, link choices, and share your dreams at PYPStories.com.</p>
+        </div>
+
+        <!-- Browse page title — browse only -->
+        <h2 id="browse-heading" class="hidden text-2xl sm:text-3xl font-semibold tracking-tighter mb-6">Browse</h2>
+
+        <!-- Filters -->
+        <div class="flex flex-col md:flex-row gap-3 items-center mb-6">
+          <div class="flex-1 w-full">
+            <input id="search-input" type="text" placeholder="Search by title, author, or description..." 
+                   class="w-full bg-slate-900 border border-slate-700 focus:border-blue-600 rounded-2xl px-4 sm:px-5 py-2.5 sm:py-3 text-sm outline-none"
+                   oninput="debounceSearch()">
+          </div>
+          
+          <div class="flex flex-col sm:flex-row gap-2 sm:gap-3 w-full md:w-auto">
+            <select id="genre-filter" onchange="loadComics()" 
+                    class="bg-slate-900 border border-slate-700 rounded-2xl px-3 sm:px-4 py-2.5 sm:py-3 text-sm outline-none">
+              <option value="All">All genres</option>
+            </select>
+            
+            <select id="sort-filter" onchange="loadComics()" 
+                    class="bg-slate-900 border border-slate-700 rounded-2xl px-3 sm:px-4 py-2.5 sm:py-3 text-sm outline-none">
+              <option value="popular">Most popular</option>
+              <option value="new">Newest</option>
+              <option value="price">Price</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Comics Grid -->
+        <div id="comics-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 sm:gap-5">
+          <!-- Populated by JS -->
+        </div>
+        
+        <div id="browse-empty" class="hidden text-center py-12 text-slate-400">
+          No stories found. Be the first to create one!
+        </div>
+      </div>
+    </div>
+
+    <!-- ACCOUNT VIEW -->
+    <div id="view-account" class="hidden max-w-3xl mx-auto px-4 sm:px-6 py-8 sm:py-10">
+      <div class="mb-6 sm:mb-8">
+        <h2 class="text-2xl sm:text-3xl md:text-4xl font-semibold tracking-tighter">Account</h2>
+        <p class="text-slate-400 text-sm sm:text-base">Profile, security, and creator earnings</p>
+      </div>
+
+      <div class="space-y-6">
+        <section class="bg-slate-900 border border-slate-800 rounded-3xl p-5 sm:p-6">
+          <h3 class="text-sm font-medium text-slate-300 mb-3">Profile</h3>
+          <div class="text-xs text-slate-400">Logged in as</div>
+          <div id="account-email" class="font-medium break-all mt-0.5"></div>
+          <div id="account-username" class="text-sm text-slate-400 mt-1"></div>
+          <div class="mt-3 text-sm">
+            Credits: $<span id="account-credits-balance">0.00</span>
+            <button type="button" onclick="showCreditsModal()" class="ml-2 text-xs text-blue-400 underline">Add credits</button>
+          </div>
+        </section>
+
+        <section class="bg-slate-900 border border-slate-800 rounded-3xl p-5 sm:p-6">
+          <h3 class="text-sm font-medium text-slate-300 mb-3">Change password</h3>
+          <div class="space-y-3">
+            <input id="current-password" type="password" placeholder="Current password" class="w-full bg-slate-950 border border-slate-700 rounded-2xl px-4 py-2.5 text-sm">
+            <input id="new-password" type="password" placeholder="New password (min 8 chars)" class="w-full bg-slate-950 border border-slate-700 rounded-2xl px-4 py-2.5 text-sm">
+            <input id="confirm-new-password" type="password" placeholder="Confirm new password" class="w-full bg-slate-950 border border-slate-700 rounded-2xl px-4 py-2.5 text-sm">
+          </div>
+          <button onclick="changePassword()" class="mt-4 w-full sm:w-auto px-5 py-2.5 bg-blue-600 hover:bg-blue-500 rounded-2xl text-sm font-medium">Update password</button>
+          <div id="change-password-error" class="mt-2 text-xs text-red-400 hidden"></div>
+          <div id="change-password-success" class="mt-2 text-xs text-emerald-400 hidden"></div>
+        </section>
+
+        <section class="bg-slate-900 border border-slate-800 rounded-3xl p-5 sm:p-6">
+          <h3 class="text-sm font-medium text-slate-300 mb-3">Creator earnings</h3>
+          <div id="account-stripe-connect" class="hidden mb-4 p-3 bg-amber-900/30 border border-amber-600 rounded-2xl text-sm">
+            Connect Stripe to receive payouts.
+            <button type="button" id="account-connect-stripe-btn" class="ml-2 px-3 py-1 bg-white text-slate-900 rounded-xl text-xs font-medium">Connect Stripe</button>
+          </div>
+          <div class="grid grid-cols-3 gap-2 text-xs text-slate-400 mb-3">
+            <div>Pending<br><span id="account-earn-pending" class="text-white text-base">$0.00</span></div>
+            <div>Available<br><span id="account-earn-available" class="text-emerald-400 text-base">$0.00</span></div>
+            <div>Paid out<br><span id="account-earn-paid" class="text-slate-300 text-base">$0.00</span></div>
+          </div>
+          <div class="text-[11px] text-slate-500 mb-3">Payouts require $50+ available after a 30-day waiting period. Platform fee: 15% (10% after $2k lifetime sales). Credit sales: Stripe top-up fees absorbed by platform.</div>
+          <button type="button" id="account-payout-btn" class="px-3 py-1.5 bg-emerald-700 hover:bg-emerald-600 rounded-xl text-xs font-medium opacity-50 cursor-not-allowed" disabled>Request payout</button>
+          <div id="account-earnings-recent" class="mt-4 space-y-1.5 text-xs text-slate-400"></div>
+        </section>
+      </div>
+    </div>
+
+    <!-- MY COMICS VIEW -->
+    <div id="view-my-comics" class="hidden max-w-6xl mx-auto px-4 sm:px-6 py-8 sm:py-10">
+      <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6 sm:mb-8">
+        <div>
+          <h2 class="text-2xl sm:text-3xl md:text-4xl font-semibold tracking-tighter">My Stories</h2>
+          <p class="text-slate-400 text-sm sm:text-base">Create, edit, and manage your branching stories</p>
+        </div>
+        <div class="flex gap-2">
+          <button onclick="showCreateComic()" 
+                  class="w-full sm:w-auto px-4 sm:px-5 py-2 sm:py-2.5 bg-blue-600 hover:bg-blue-500 transition-colors rounded-2xl text-sm font-medium flex items-center gap-2 justify-center">
+            <span>+</span> New Story
+          </button>
+        </div>
+      </div>
+
+      <div id="my-comics-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5">
+        <!-- JS populated -->
+      </div>
+      
+      <div id="my-comics-empty" class="hidden text-center py-12 text-slate-400 border border-slate-800 rounded-3xl">
+        You haven't created any stories yet.
+      </div>
+    </div>
+
+    <!-- ADMIN REVIEW VIEW -->
+    <div id="view-admin-reviews" class="hidden max-w-6xl mx-auto px-4 sm:px-6 py-8 sm:py-10">
+      <div class="flex items-center justify-between mb-6">
+        <div>
+          <h2 class="text-2xl sm:text-3xl md:text-4xl font-semibold tracking-tighter">Review Queue</h2>
+          <p class="text-slate-400 text-sm sm:text-base">Stories submitted for review</p>
+        </div>
+      </div>
+
+      <div id="admin-reviews-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5">
+        <!-- JS populated -->
+      </div>
+      
+      <div id="admin-reviews-empty" class="hidden text-center py-12 text-slate-400 border border-slate-800 rounded-3xl">
+        No stories waiting for review.
+      </div>
+    </div>
+  </div>
+
+  <!-- COMIC READER (above editor so Preview is visible) -->
+  <div id="reader-modal" 
+       class="hidden fixed top-14 sm:top-16 left-0 right-0 bottom-0 bg-black/90 z-[45] flex flex-col overflow-hidden">
+    <div onclick="event.stopImmediatePropagation()" 
+         class="w-full h-full bg-slate-900 border border-slate-700 flex flex-col min-h-0" style="height:100%;">
+      
+      <!-- Reader Header -->
+      <div class="px-4 sm:px-6 py-3 sm:py-4 border-b border-slate-800 flex items-center justify-between flex-shrink-0">
+        <div>
+          <div id="reader-comic-title" class="font-semibold text-sm sm:text-base"></div>
+          <div id="reader-author" class="text-xs text-slate-400"></div>
+        </div>
+        <div class="flex items-center gap-1 sm:gap-3 text-xs sm:text-sm">
+          <div id="reader-progress" class="text-slate-400"></div>
+          <button onclick="closeReader()" class="text-slate-400 hover:text-white px-2 sm:px-3 py-1">Close</button>
+          <button onclick="restartStory()" class="px-3 sm:px-4 py-1 bg-slate-800 hover:bg-slate-700 rounded-xl text-xs sm:text-sm">Restart</button>
+        </div>
+      </div>
+
+      <!-- Story Content -->
+      <div id="reader-scroll" class="flex-1 overflow-auto p-4 sm:p-6 bg-slate-950 min-h-0">
+        <div id="reader-content" class="max-w-4xl mx-auto px-1">
+          <div id="reader-image-container" class="mb-6 rounded-2xl overflow-hidden border border-slate-800 bg-slate-900">
+            <img id="reader-image" class="w-full h-auto block" style="display:none">
+            <div id="reader-image-placeholder" class="min-h-52 flex items-center justify-center text-slate-500 text-sm" style="min-height:200px">
+              No image for this page
+            </div>
+          </div>
+
+          <div id="reader-text" class="story-text text-slate-200 whitespace-pre-line leading-relaxed"></div>
+
+          <!-- Limited ads for free stories only (platform revenue) -->
+          <div id="reader-ad" class="my-6 text-center hidden">
+            <!-- AdSense unit will be injected here for free stories -->
+          </div>
+        </div>
+      </div>
+
+      <!-- Choices (compact footer — thumbs only, never full page art) -->
+      <div class="p-3 sm:p-4 border-t border-slate-800 bg-slate-900 flex-shrink-0 max-h-[40vh] overflow-y-auto">
+        <div class="max-w-[720px] mx-auto">
+          <div class="flex flex-col sm:flex-row gap-2 sm:gap-3 items-stretch" id="reader-choices-row">
+            <button id="reader-back-btn"
+                    class="hidden px-3 py-1.5 sm:py-0 bg-slate-800 hover:bg-slate-700 active:bg-slate-600 rounded-2xl text-xs sm:text-sm font-medium flex-shrink-0 flex items-center justify-center border border-slate-700 min-h-[36px] sm:min-h-[42px] w-full sm:w-auto"
+                    style="min-width: 5rem;">
+              Go Back
+            </button>
+            <div id="reader-choices" class="flex-1 space-y-2"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- COMIC INFO / TITLE + DESCRIPTION MODAL (shown first when browsing) -->
+  <div id="comic-info-modal" onclick="if (event.target.id === 'comic-info-modal') closeComicInfo()" 
+       class="hidden fixed inset-0 bg-black/90 z-[55] flex items-center justify-center p-4">
+    <div onclick="event.stopImmediatePropagation()" 
+         class="w-full max-w-[520px] bg-slate-900 rounded-3xl border border-slate-700 overflow-hidden flex flex-col mt-4 sm:mt-16">
+      <!-- Header -->
+      <div class="px-6 py-3.5 border-b border-slate-800 flex items-center justify-between text-sm">
+        <div class="text-slate-400">Story Details</div>
+        <button onclick="closeComicInfo()" class="text-slate-400 hover:text-white px-2">Close</button>
+      </div>
+
+      <div class="p-4 sm:p-6">
+        <div id="info-title" class="text-2xl font-semibold tracking-tight"></div>
+        <div id="info-author" class="mt-1 text-sm"></div>
+
+        <div class="flex flex-wrap gap-2 mt-3 text-xs">
+          <div id="info-genre" class="px-2.5 py-0.5 bg-slate-800 rounded-full text-slate-300"></div>
+          <div id="info-pages" class="px-2.5 py-0.5 bg-slate-800 rounded-full text-slate-400"></div>
+          <div id="info-price" class="px-2.5 py-0.5 bg-emerald-900/70 text-emerald-400 rounded-full font-medium"></div>
+        </div>
+
+        <div class="mt-5">
+          <div class="uppercase text-[10px] tracking-[1px] text-slate-500 mb-1.5">Description</div>
+          <div id="info-description" class="text-[15px] text-slate-200 leading-relaxed whitespace-pre-line max-h-[210px] overflow-auto pr-1"></div>
+        </div>
+      </div>
+
+      <!-- Chapters (if any) -->
+      <div id="info-chapters-wrap" class="hidden px-4 sm:px-6 pb-2">
+        <div class="uppercase text-[10px] tracking-[1px] text-slate-500 mb-1.5">Chapters</div>
+        <div id="info-chapters-list" class="space-y-1.5 max-h-40 overflow-auto"></div>
+      </div>
+
+      <!-- Action buttons -->
+      <div class="p-4 sm:p-6 pt-4 border-t border-slate-800 bg-slate-950 flex flex-col gap-2.5">
+        <button id="info-read-sample-btn"
+                class="w-full py-3 rounded-2xl bg-slate-800 hover:bg-slate-700 active:bg-slate-600 text-sm font-medium transition-colors">
+          Read Sample (first choice free)
+        </button>
+        <button id="info-purchase-btn"
+                class="w-full py-3 rounded-2xl bg-white text-slate-900 text-sm font-medium hover:bg-slate-100 active:bg-slate-200 transition-colors">
+          Purchase
+        </button>
+        <div id="info-credit-balance" class="hidden text-[11px] text-center text-slate-400"></div>
+        <div id="info-sample-tip" class="text-[10px] text-center text-slate-500 pt-1">First choice is free</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- CREDITS MODAL -->
+  <div id="credits-modal" onclick="if (event.target.id === 'credits-modal') closeCreditsModal()"
+       class="hidden fixed inset-0 bg-black/90 z-[70] flex items-center justify-center p-4">
+    <div onclick="event.stopImmediatePropagation()" class="w-full max-w-md bg-slate-900 border border-slate-700 rounded-3xl overflow-hidden">
+      <div class="px-5 py-3.5 border-b border-slate-800 flex items-center justify-between">
+        <div class="font-semibold">Credits</div>
+        <button onclick="closeCreditsModal()" class="text-slate-400 hover:text-white px-2">Close</button>
+      </div>
+      <div class="p-5 space-y-4">
+        <div class="text-sm text-slate-400">1 credit = $0.01. Use credits for chapters (e.g. $0.99). Stripe fees on top-ups are absorbed by the platform.</div>
+        <div class="text-2xl font-semibold">Balance: $<span id="credits-balance-display">0.00</span></div>
+        <div id="credits-packages" class="space-y-2"></div>
+        <div class="text-[11px] text-slate-500">Minimum top-up $5. Purchases over $20 include a 10% credit bonus.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- CREATE / EDIT COMIC MODAL -->
+  <div id="create-modal" 
+       class="hidden fixed top-14 sm:top-16 left-0 right-0 bottom-0 bg-black/80 z-40 flex flex-col overflow-hidden">
+    <div onclick="event.stopImmediatePropagation()" class="bg-slate-900 border border-slate-700 w-full h-full p-4 sm:p-6 flex flex-col min-h-0" style="height:100%;">
+      <h3 id="create-modal-title" class="text-2xl font-semibold tracking-tight mb-5">Create New Story</h3>
+      
+      <div id="create-form">
+        <div class="space-y-4">
+          <div>
+            <label class="text-xs text-slate-400">Story Title</label>
+            <input id="comic-title" type="text" class="w-full mt-1 bg-slate-950 border border-slate-700 rounded-2xl px-4 py-2.5 text-sm">
+          </div>
+          <div>
+            <label class="text-xs text-slate-400">Description</label>
+            <textarea id="comic-desc" rows="3" class="w-full mt-1 bg-slate-950 border border-slate-700 rounded-3xl px-4 py-2.5 text-sm"></textarea>
+          </div>
+          <div>
+            <label class="text-xs text-slate-400">Genre / Type</label>
+            <select id="comic-genre" class="w-full mt-1 bg-slate-950 border border-slate-700 rounded-2xl px-4 py-2.5 text-sm">
+              <option>Fantasy</option>
+              <option>Sci-Fi</option>
+              <option>Horror</option>
+              <option>Mystery</option>
+              <option>Adventure</option>
+              <option>Romance</option>
+              <option>Comedy</option>
+              <option>Drama</option>
+              <option>Other</option>
+            </select>
+          </div>
+          <div>
+            <label class="text-xs text-slate-400">Full story / bundle price (USD) — 0 free, or ≥ $5.99. Smaller prices use chapters + credits.</label>
+            <input id="comic-price" type="number" step="0.01" min="0" value="0" class="w-full mt-1 bg-slate-950 border border-slate-700 rounded-2xl px-4 py-2.5 text-sm">
+          </div>
+        </div>
+
+        <div class="flex flex-col sm:flex-row gap-3 mt-6">
+          <button onclick="closeCreateModal()" class="flex-1 py-2.5 border border-slate-700 rounded-2xl text-sm">Cancel</button>
+          <button onclick="createComic()" class="flex-1 py-2.5 bg-white text-slate-900 font-medium rounded-2xl">Create Story</button>
+        </div>
+      </div>
+
+      <!-- Editor view inside modal (after story is created) -->
+      <div id="editor-section" class="hidden flex-1 flex flex-col min-h-0">
+        <div class="mb-4 flex-shrink-0">
+          <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+            <div class="flex-1 min-w-0">
+              <div id="editor-comic-title" class="font-semibold text-base sm:text-lg"></div>
+              <div id="editor-comic-genre" class="text-xs text-blue-400"></div>
+              <div class="mt-1 flex flex-wrap items-center gap-1 text-xs">
+                <span class="text-slate-400">Price:</span>
+                <input id="editor-comic-price" type="text" placeholder="0 or 4.99" class="w-16 sm:w-20 bg-slate-800 border border-slate-700 rounded px-1.5 py-0.5 text-xs">
+                <button onclick="saveComicPrice()" class="px-2 py-0.5 bg-blue-600 hover:bg-blue-500 rounded text-xs">Save</button>
+              </div>
+              <div class="text-[9px] text-slate-500 mt-0.5">0 = Free • ≥$5.99 = full story/bundle • chapters for smaller prices</div>
+            </div>
+            <div class="flex flex-wrap gap-2 items-center">
+              <button type="button" id="editor-cover-btn"
+                      class="text-xs sm:text-sm px-3 sm:px-4 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-600 rounded-xl">
+                Add Cover
+              </button>
+              <button onclick="addNewPage()" 
+                      class="text-xs sm:text-sm px-3 sm:px-4 py-1.5 bg-blue-600 hover:bg-blue-500 rounded-xl">+ Add Page(s)</button>
+              <button onclick="openStoryBuilder()" 
+                      class="text-xs sm:text-sm px-3 sm:px-4 py-1.5 bg-purple-600 hover:bg-purple-500 rounded-xl">Build Structure</button>
+              <input type="file" id="editor-cover-input" accept="image/*" class="hidden">
+            </div>
+          </div>
+          <!-- Compact cover status + thumbnail (browse-card size, not full width) -->
+          <div class="mt-3 flex items-center gap-3">
+            <div id="editor-cover-preview"
+                 class="rounded-xl overflow-hidden border border-slate-700 bg-slate-950 flex-shrink-0"
+                 style="width:10.5rem;height:7rem;">
+              <div id="editor-cover-placeholder" class="w-full h-full flex items-center justify-center text-slate-500 text-[10px] px-2 text-center">No cover</div>
+              <img id="editor-cover-img" alt="Cover" class="w-full h-full object-contain bg-slate-950 hidden" style="width:10.5rem;height:7rem;object-fit:contain;">
+            </div>
+            <div class="min-w-0 text-[11px] text-slate-500">
+              <div class="text-slate-400 font-medium">Browse cover</div>
+              <div id="editor-cover-status" class="mt-0.5">Shown on story cards. Click Add Cover to upload.</div>
+              <div class="mt-1 text-slate-600">Best: landscape <span class="text-slate-400">3:2</span> (e.g. 1200×800). Full image is shown; other shapes may leave empty bars.</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="mb-4 p-3 bg-slate-950 border border-slate-800 rounded-2xl flex-shrink-0">
+          <div class="flex items-center justify-between gap-2 mb-2">
+            <div class="text-xs font-medium text-slate-300">Chapters (credits — e.g. $0.99 each)</div>
+            <button type="button" onclick="addEditorChapter()" class="text-xs px-2 py-1 bg-slate-800 hover:bg-slate-700 rounded-xl">+ Chapter</button>
+          </div>
+          <div id="editor-chapters-list" class="space-y-2 text-xs"></div>
+        </div>
+
+        <div id="pages-list" class="flex-1 overflow-auto space-y-2 pr-1 min-h-0"></div>
+
+        <div class="mt-5 flex flex-col sm:flex-row gap-3 text-sm flex-shrink-0">
+          <button onclick="previewComic()" class="flex-1 py-2 border border-slate-700 rounded-2xl hover:bg-slate-800">Preview Reader</button>
+          <button onclick="closeCreateModal()" class="flex-1 py-2 bg-white text-slate-900 font-medium rounded-2xl">Done</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Auth Modal -->
+  <div id="auth-modal" onclick="if (event.target.id === 'auth-modal') closeAuthModal()" 
+       class="hidden fixed inset-0 bg-black/80 z-[80] flex items-center justify-center p-4">
+    <div onclick="event.stopImmediatePropagation()" class="bg-slate-900 border border-slate-700 rounded-3xl w-full max-w-sm p-5 sm:p-7 mt-4 sm:mt-16">
+      <div id="auth-tabs" class="flex mb-6 border-b border-slate-800">
+        <button onclick="switchAuthTab('login')" id="tab-login"
+                class="flex-1 pb-3 text-sm font-medium border-b-2 border-blue-500">Log in</button>
+        <button onclick="switchAuthTab('register')" id="tab-register"
+                class="flex-1 pb-3 text-sm font-medium text-slate-400">Create account</button>
+      </div>
+
+      <form id="login-form" onsubmit="event.preventDefault(); login();">
+        <div class="space-y-4">
+          <input id="login-email" type="email" placeholder="Email address" class="w-full bg-slate-950 border border-slate-700 rounded-2xl px-5 py-3 text-sm">
+          <input id="login-password" type="password" placeholder="Password" class="w-full bg-slate-950 border border-slate-700 rounded-2xl px-5 py-3 text-sm">
+          <label class="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
+            <input id="login-remember" type="checkbox" class="accent-blue-600" checked>
+            <span>Remember me (stay logged in)</span>
+          </label>
+        </div>
+        <button type="submit" class="mt-5 w-full py-3 bg-white text-slate-900 rounded-2xl font-medium">Log in</button>
+        
+        <div class="mt-3 flex justify-between items-center text-sm">
+          <button onclick="showForgotPassword()" class="text-blue-400 hover:text-blue-300 text-xs">Forgot password?</button>
+          <div id="login-resend" class="hidden">
+            <button onclick="resendFromLogin()" class="text-blue-400 hover:text-blue-300 text-xs">Resend verification</button>
+          </div>
+        </div>
+        
+        <div id="login-error" class="mt-2 text-xs text-red-400 hidden"></div>
+      </form>
+
+      <div id="register-form" class="hidden">
+        <div class="space-y-4">
+          <input id="reg-email" type="email" placeholder="Email address (required)" class="w-full bg-slate-950 border border-slate-700 rounded-2xl px-5 py-3 text-sm">
+          <input id="reg-username" type="text" placeholder="Display name (optional)" class="w-full bg-slate-950 border border-slate-700 rounded-2xl px-5 py-3 text-sm">
+          <input id="reg-password" type="password" placeholder="Password (min 8 characters)" class="w-full bg-slate-950 border border-slate-700 rounded-2xl px-5 py-3 text-sm">
+          <input id="reg-password2" type="password" placeholder="Confirm password" class="w-full bg-slate-950 border border-slate-700 rounded-2xl px-5 py-3 text-sm">
+        </div>
+        <button onclick="register()" class="mt-5 w-full py-3 bg-white text-slate-900 rounded-2xl font-medium">Create account</button>
+        <div class="mt-3 text-xs text-slate-400 text-center">
+          We'll send a verification link to your email.
+        </div>
+        <div id="reg-error" class="mt-2 text-xs text-red-400 hidden"></div>
+      </div>
+
+      <!-- Forgot Password Form -->
+      <div id="forgot-password-form" class="hidden">
+        <div class="mb-4">
+          <div class="text-sm font-medium mb-2">Reset your password</div>
+          <p class="text-xs text-slate-400 mb-3">Enter your email and we'll send a reset link.</p>
+        </div>
+        <div class="space-y-4">
+          <input id="forgot-email" type="email" placeholder="Your email address" class="w-full bg-slate-950 border border-slate-700 rounded-2xl px-5 py-3 text-sm">
+        </div>
+        <button onclick="sendForgotPassword()" class="mt-5 w-full py-3 bg-white text-slate-900 rounded-2xl font-medium">Send reset link</button>
+        <button onclick="switchAuthTab('login')" class="mt-2 w-full text-xs text-slate-400 hover:text-slate-200">Back to login</button>
+        <div id="forgot-error" class="mt-2 text-xs text-red-400 hidden"></div>
+        <div id="forgot-success" class="mt-2 text-xs text-emerald-400 hidden"></div>
+      </div>
+
+      <!-- Password Reset Form (for ?token links) -->
+      <div id="reset-password-form" class="hidden">
+        <div class="mb-4">
+          <div class="text-sm font-medium mb-2">Set new password</div>
+        </div>
+        <div class="space-y-4">
+          <input id="reset-password" type="password" placeholder="New password (min 8 chars)" class="w-full bg-slate-950 border border-slate-700 rounded-2xl px-5 py-3 text-sm">
+          <input id="reset-password2" type="password" placeholder="Confirm new password" class="w-full bg-slate-950 border border-slate-700 rounded-2xl px-5 py-3 text-sm">
+        </div>
+        <button onclick="submitPasswordReset()" class="mt-5 w-full py-3 bg-white text-slate-900 rounded-2xl font-medium">Reset Password</button>
+        <div id="reset-error" class="mt-2 text-xs text-red-400 hidden"></div>
+      </div>
+    </div>
+  </div>
+
+    <script src="/js/app.js"></script>
+</body>
+</html>
+

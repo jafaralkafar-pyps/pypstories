@@ -1,0 +1,40 @@
+{
+  "name": "pick-your-path-stories",
+  "version": "0.1.0",
+  "description": "Pick Your Path Stories - Upload and read choose-your-own-adventure stories and comics",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "build:css": "tailwindcss -i ./public/css/input.css -o ./public/css/tailwind.css --minify",
+    "watch:css": "tailwindcss -i ./public/css/input.css -o ./public/css/tailwind.css --watch"
+  },
+  "keywords": [
+    "cyoa",
+    "choose-your-own-adventure",
+    "interactive",
+    "stories",
+    "comics"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "bcryptjs": "^3.0.3",
+    "better-sqlite3": "^12.11.1",
+    "connect-sqlite3": "^0.9.16",
+    "cookie-parser": "^1.4.7",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "express-rate-limit": "^8.5.2",
+    "express-session": "^1.19.0",
+    "helmet": "^8.2.0",
+    "multer": "^2.2.0",
+    "nodemailer": "^9.0.1",
+    "resend": "^6.16.0",
+    "stripe": "^22.3.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/cli": "^4.3.1",
+    "tailwindcss": "^4.3.1"
+  }
+}

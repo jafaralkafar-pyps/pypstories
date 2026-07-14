@@ -1,0 +1,31 @@
+# Dependencies
+node_modules/
+
+# Secrets — never commit
+.env
+.env.*
+!.env.example
+
+# Local data & uploads
+data/
+uploads/
+*.db
+*.sqlite
+*.sqlite3
+
+# Logs
+*.log
+npm-debug.log*
+server.out.log
+server.err.log
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/
+
+# Temp
+temp_*.js
+*.tmp
