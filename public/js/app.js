@@ -129,18 +129,26 @@
           `;
           myBtn.classList.remove('hidden');
         } else {
-          container.innerHTML = `<button onclick="showAuthModal()" class="px-3 sm:px-5 py-1 sm:py-1.5 text-xs sm:text-sm font-medium bg-white text-slate-900 rounded-2xl hover:bg-slate-100">Log in</button>`;
+          container.innerHTML = `
+            <div class="flex items-center gap-1.5 sm:gap-2">
+              <button type="button" onclick="showAuthModal('login')" class="px-2.5 sm:px-4 py-1 sm:py-1.5 text-xs sm:text-sm font-medium border border-slate-600 rounded-2xl hover:bg-slate-900">Log in</button>
+              <button type="button" onclick="showAuthModal('register')" class="px-2.5 sm:px-4 py-1 sm:py-1.5 text-xs sm:text-sm font-medium bg-white text-slate-900 rounded-2xl hover:bg-slate-100">Sign up</button>
+            </div>`;
           myBtn.classList.add('hidden');
         }
       } catch (e) {
-        container.innerHTML = `<button onclick="showAuthModal()" class="px-3 sm:px-5 py-1 sm:py-1.5 text-xs sm:text-sm font-medium bg-white text-slate-900 rounded-2xl hover:bg-slate-100">Log in</button>`;
+        container.innerHTML = `
+          <div class="flex items-center gap-1.5 sm:gap-2">
+            <button type="button" onclick="showAuthModal('login')" class="px-2.5 sm:px-4 py-1 sm:py-1.5 text-xs sm:text-sm font-medium border border-slate-600 rounded-2xl hover:bg-slate-900">Log in</button>
+            <button type="button" onclick="showAuthModal('register')" class="px-2.5 sm:px-4 py-1 sm:py-1.5 text-xs sm:text-sm font-medium bg-white text-slate-900 rounded-2xl hover:bg-slate-100">Sign up</button>
+          </div>`;
       }
     }
 
-    function showAuthModal() {
+    function showAuthModal(tab) {
       document.getElementById('auth-modal').classList.remove('hidden');
       clearAuthForms();
-      switchAuthTab('login');
+      switchAuthTab(tab === 'register' ? 'register' : 'login');
     }
 
     function clearAuthForms() {
@@ -2989,6 +2997,21 @@
     window.openStoryBuilder = openStoryBuilder;
     window.showCreateComic = showCreateComic;
     window.editComic = editComic;
+    window.showAuthModal = showAuthModal;
+    window.closeAuthModal = closeAuthModal;
+    window.switchAuthTab = switchAuthTab;
+    window.login = login;
+    window.register = register;
+    window.logout = logout;
+    window.showForgotPassword = showForgotPassword;
+    window.resendFromLogin = resendFromLogin;
+    window.showHome = showHome;
+    window.showBrowse = showBrowse;
+    window.showMyComics = showMyComics;
+    window.showCreditsModal = showCreditsModal;
+    window.closeCreditsModal = closeCreditsModal;
+    window.showAccountModal = showAccountModal;
+    window.showAdminReviews = showAdminReviews;
 
     // Boot
     window.onload = init;

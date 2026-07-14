@@ -59,6 +59,9 @@ app.use(helmet({
           // Allow same-origin CSS/JS plus the large inline <style> block in index.html
           "style-src": ["'self'", "'unsafe-inline'"],
           "script-src": ["'self'"],
+          // HTML uses many onclick="..." handlers; Helmet default is script-src-attr 'none'
+          // which makes buttons appear dead (e.g. Log in does nothing).
+          "script-src-attr": ["'unsafe-inline'"],
           "img-src": ["'self'", "data:", "blob:"],
           // Disable forced HTTPS upgrades until the public URL is HTTPS
           ...(appUrlIsHttps ? {} : { "upgrade-insecure-requests": null }),
