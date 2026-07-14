@@ -42,13 +42,28 @@ const stripe = stripeSecretKey.startsWith('sk_')
   ? new Stripe(stripeSecretKey, { apiVersion: '2026-06-24.dahlia' })
   : null;
 
-// Security: Helmet for secure headers
-// In development we relax headers because modern browsers (Chrome) are very aggressive
-// about forcing HTTPS and blocking mixed content for non-localhost origins.
-// This is the cause of the "unsafe attempt" and ERR_SSL errors when using IP.
+// Security: Helmet for secure headers.
+// Default Helmet CSP includes upgrade-insecure-requests, which breaks CSS/JS when
+// the site is opened over plain HTTP (e.g. http://droplet-ip before Certbot).
+// Only enable that directive when APP_URL is already https://
 const isProd = NODE_ENV === 'production';
+const appUrlIsHttps = /^https:\/\//i.test(APP_URL);
 app.use(helmet({
-  contentSecurityPolicy: isProd ? undefined : false,
+  contentSecurityPolicy: isProd
+    ? {
+        useDefaults: true,
+        directives: {
+          // Allow same-origin CSS/JS plus the large inline <style> block in index.html
+          "style-src": ["'self'", "'unsafe-inline'"],
+          "script-src": ["'self'"],
+          "img-src": ["'self'", "data:", "blob:"],
+          // Disable forced HTTPS upgrades until the public URL is HTTPS
+          ...(appUrlIsHttps ? {} : { "upgrade-insecure-requests": null }),
+        },
+      }
+    : false,
+  // Don't send HSTS until we're actually serving HTTPS publicly
+  hsts: appUrlIsHttps,
   crossOriginEmbedderPolicy: false,
   crossOriginOpenerPolicy: false,
   crossOriginResourcePolicy: false,
