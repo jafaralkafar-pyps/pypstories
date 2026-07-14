@@ -23,6 +23,9 @@ const APP_URL = process.env.APP_URL || `http://localhost:${PORT}`;
 
 const app = express();
 
+// Behind Nginx, trust X-Forwarded-* so secure cookies / IPs work correctly
+app.set('trust proxy', 1);
+
 // In dev, explicitly tell browsers never to upgrade to HTTPS for this origin.
 // This helps with the "https upgrade" errors when accessing via IP.
 if (NODE_ENV !== 'production') {
@@ -396,7 +399,9 @@ app.use(session({
   cookie: {
     maxAge: 1000 * 60 * 60 * 24 * 7, // default 7 days (overridden by rememberMe)
     httpOnly: true,
-    secure: NODE_ENV === 'production',
+    // Secure cookies only work over HTTPS. Using them on http://droplet-ip
+    // makes login/signup appear broken (session never sticks).
+    secure: appUrlIsHttps,
     sameSite: 'lax'
   }
 }));
