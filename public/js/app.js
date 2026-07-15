@@ -32,20 +32,15 @@
     }
 
     function ensureAdSenseScript() {
-      if (!adsenseConfig.enabled || !adsenseConfig.client) return Promise.resolve(false);
-      if (window.adsbygoogle && document.querySelector('script[data-adsense-loader]')) {
+      // Script may already be in index.html <head> for AdSense site verification
+      const headScript = document.querySelector('script[src*="pagead2.googlesyndication.com/pagead/js/adsbygoogle.js"]');
+      if (headScript || window.adsbygoogle) {
         return Promise.resolve(true);
       }
+      if (!adsenseConfig.enabled || !adsenseConfig.client) return Promise.resolve(false);
       if (adsenseScriptLoading) return adsenseScriptLoading;
 
       adsenseScriptLoading = new Promise((resolve) => {
-        const existing = document.querySelector('script[data-adsense-loader]');
-        if (existing) {
-          existing.addEventListener('load', () => resolve(true));
-          existing.addEventListener('error', () => resolve(false));
-          if (window.adsbygoogle) resolve(true);
-          return;
-        }
         const s = document.createElement('script');
         s.async = true;
         s.src = `https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=${encodeURIComponent(adsenseConfig.client)}`;
