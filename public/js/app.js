@@ -241,7 +241,7 @@
         errorEl.textContent = data.error;
         errorEl.classList.remove('hidden');
         if (data.requiresVerification) {
-          errorEl.textContent += ' Use “Resend verification email” below.';
+          errorEl.textContent += ' Use “Resend verification email” below. Also check your spam/junk folder.';
         }
         return;
       }
@@ -284,7 +284,7 @@
       if (data.error) {
         // Account already exists (often unverified from an earlier attempt)
         if (res.status === 409) {
-          errorEl.textContent = data.error + ' If you never got a verification email, switch to Log in and use Resend verification email.';
+          errorEl.textContent = data.error + ' Check spam/junk, or switch to Log in and use Resend verification email.';
         } else {
           errorEl.textContent = data.error;
         }
@@ -298,7 +298,7 @@
       if (loginEmail) loginEmail.value = email;
       const statusEl = document.getElementById('login-resend-status');
       if (statusEl) {
-        statusEl.textContent = `Account created. Check ${email} for a verification link, or click Resend verification email.`;
+        statusEl.textContent = `Account created. Check ${email} for a verification link (including spam/junk). You can also click Resend verification email.`;
         statusEl.classList.remove('hidden', 'text-red-400');
         statusEl.classList.add('text-emerald-400');
       }
@@ -314,7 +314,7 @@
       if (!res.ok || data.error) {
         return { ok: false, message: data.error || 'Failed to send verification email.' };
       }
-      return { ok: true, message: data.message || 'Verification email sent if the account exists and is unverified.' };
+      return { ok: true, message: data.message || 'Verification email sent if the account exists and is unverified. Check your inbox and spam/junk folder.' };
     }
 
     async function resendFromLogin() {
@@ -387,7 +387,7 @@
         errorEl.textContent = data.error;
         errorEl.classList.remove('hidden');
       } else {
-        successEl.textContent = data.message || 'Check your email for the reset link.';
+        successEl.textContent = data.message || 'Check your email for the reset link (including spam/junk).';
         successEl.classList.remove('hidden');
       }
     }
@@ -851,7 +851,7 @@
         return;
       }
       if (!currentUser.email_verified) {
-        alert('Please verify your email address before creating stories.\nCheck your inbox or request a new verification link after logging in.');
+        alert('Please verify your email address before creating stories.\nCheck your inbox and spam/junk folder, or use Resend verification email on the Log in screen.');
         return;
       }
       editingComicId = null;

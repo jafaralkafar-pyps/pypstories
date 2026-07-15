@@ -718,7 +718,7 @@ app.post('/api/register', authLimiter, async (req, res) => {
   // Do NOT log the user in until verified
   res.json({ 
     success: true, 
-    message: 'Account created. Please check your email to verify your account.',
+    message: 'Account created. Please check your email (and spam/junk folder) to verify your account.',
     requiresVerification: true,
     email: email.toLowerCase()
   });
@@ -739,7 +739,7 @@ app.post('/api/login', authLimiter, (req, res) => {
 
   if (!user.email_verified) {
     return res.status(403).json({ 
-      error: 'Please verify your email address before logging in.',
+      error: 'Please verify your email address before logging in. Check your inbox and spam/junk folder.',
       requiresVerification: true,
       email: user.email 
     });
@@ -833,11 +833,11 @@ app.post('/api/resend-verification', authLimiter, async (req, res) => {
 
   if (!user) {
     // Don't reveal if user exists
-    return res.json({ success: true, message: 'If an account exists, a verification email has been sent.' });
+    return res.json({ success: true, message: 'If an account exists, a verification email has been sent. Check your inbox and spam/junk folder.' });
   }
 
   if (user.email_verified) {
-    return res.json({ success: true, message: 'This email is already verified.' });
+    return res.json({ success: true, message: 'This email is already verified. You can log in.' });
   }
 
   // Generate new token
@@ -857,7 +857,7 @@ app.post('/api/resend-verification', authLimiter, async (req, res) => {
     });
   }
 
-  res.json({ success: true, message: 'Verification email has been resent. Check your inbox and spam folder.' });
+  res.json({ success: true, message: 'Verification email has been resent. Check your inbox and spam/junk folder (Yahoo and others often filter these).' });
 });
 
 // Get current verification status
