@@ -176,12 +176,36 @@
         browseHeading.classList.remove('hidden');
         if (seoAbout) seoAbout.classList.add('hidden');
       }
+      guardSearchAgainstAutofill();
       loadComics();
     }
 
     function debounceSearch() {
       clearTimeout(window.searchTimeout);
       window.searchTimeout = setTimeout(() => loadComics(), 220);
+    }
+
+    /** Chrome/password managers often dump the saved email into the story search box. */
+    function scrubSearchAutofill() {
+      const el = document.getElementById('search-input');
+      if (!el) return;
+      const v = (el.value || '').trim();
+      // Clear values that look like an email, not a story title search
+      if (v.includes('@') || (v.includes('.') && /\S+@\S+/.test(v))) {
+        el.value = '';
+      }
+    }
+
+    function guardSearchAgainstAutofill() {
+      scrubSearchAutofill();
+      // Autofill often runs after load (async)
+      [50, 200, 500, 1000, 2000].forEach((ms) => setTimeout(scrubSearchAutofill, ms));
+      const el = document.getElementById('search-input');
+      if (el && !el.dataset.autofillGuard) {
+        el.dataset.autofillGuard = '1';
+        el.addEventListener('animationstart', scrubSearchAutofill); // Chrome autofill animation
+        el.addEventListener('change', scrubSearchAutofill);
+      }
     }
 
     // Navbar + Auth UI
@@ -3322,6 +3346,7 @@
 
       // Show landing page by default
       showHome();
+      guardSearchAgainstAutofill();
     }
 
     // Expose handlers used by inline onclick attributes
