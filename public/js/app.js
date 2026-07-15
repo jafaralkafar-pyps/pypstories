@@ -1333,13 +1333,17 @@
 
       function addFiles(newFiles) {
         const valid = [];
+        const maxBytes = 25 * 1024 * 1024;
         for (const f of newFiles) {
-          if (!f.type.startsWith('image/')) {
+          // Some browsers leave type empty for certain files — still allow by extension
+          const looksImage = (f.type && f.type.startsWith('image/')) ||
+            /\.(jpe?g|png|gif|webp)$/i.test(f.name || '');
+          if (!looksImage) {
             alert(`Skipped non-image: ${f.name}`);
             continue;
           }
-          if (f.size > 10 * 1024 * 1024) {
-            alert(`Skipped (over 10MB): ${f.name}`);
+          if (f.size > maxBytes) {
+            alert(`Skipped (over 25MB): ${f.name}`);
             continue;
           }
           valid.push(f);
@@ -1393,6 +1397,10 @@
           alert('Please select or drop at least one image');
           return;
         }
+        if (!editingComicId) {
+          alert('No story selected. Close this and open the editor again.');
+          return;
+        }
 
         const prefix = (prefixInput.value || '').trim();
         const useFilenames = useFilenamesCb.checked;
@@ -1400,16 +1408,19 @@
         uploadBtn.textContent = `Uploading ${selectedFiles.length}...`;
         uploadBtn.disabled = true;
 
-        try {
-          const form = new FormData();
-          selectedFiles.forEach(f => form.append('images', f));  // note plural for array
-          if (prefix) form.append('title_prefix', prefix);
+        async function parseJsonSafe(res) {
+          const text = await res.text();
+          if (!text) return {};
+          try { return JSON.parse(text); } catch (_) {
+            return { error: text.slice(0, 200) || `HTTP ${res.status}` };
+          }
+        }
 
-          // If exactly 1 file, we can also send full metadata for compatibility / rich single
+        try {
+          // Single file: rich endpoint (title, caption, start page)
           if (selectedFiles.length === 1) {
-            const title = widget.querySelector('#page-title-prefix').value.trim() || 
-                          (useFilenames ? '' : `Page ${Date.now()}`);
-            // fallback to single endpoint for rich data (text + start)
+            const title = widget.querySelector('#page-title-prefix').value.trim() ||
+                          (useFilenames ? selectedFiles[0].name.replace(/\.[^/.]+$/, '') : `Page ${Date.now()}`);
             const singleForm = new FormData();
             singleForm.append('image', selectedFiles[0]);
             singleForm.append('title', title || selectedFiles[0].name.replace(/\.[^/.]+$/, ''));
@@ -1418,38 +1429,57 @@
 
             const res = await fetch(`/api/comics/${editingComicId}/pages`, {
               method: 'POST',
-              body: singleForm
+              body: singleForm,
+              credentials: 'same-origin'
             });
-            let page = {};
-            try { page = await res.json(); } catch (_) {}
-            widget.remove();
+            const page = await parseJsonSafe(res);
             if (!res.ok || page.error) {
-              alert(page.error || `Upload failed (${res.status}). File may be too large — max 25MB per image.`);
-            } else {
+              alert(page.error || `Upload failed (HTTP ${res.status}).`);
+              uploadBtn.textContent = 'Add Page(s)';
+              uploadBtn.disabled = false;
+              return;
+            }
+            widget.remove();
+            try {
               await loadEditor(editingComicId);
+            } catch (reloadErr) {
+              console.error(reloadErr);
+              alert('Image uploaded, but the editor failed to refresh. Close and reopen the story.');
             }
             return;
           }
 
           // Bulk path
+          const form = new FormData();
+          selectedFiles.forEach(f => form.append('images', f));
+          if (prefix) form.append('title_prefix', prefix);
+
           const res = await fetch(`/api/comics/${editingComicId}/pages/bulk`, {
             method: 'POST',
-            body: form
+            body: form,
+            credentials: 'same-origin'
           });
-          let data = {};
-          try { data = await res.json(); } catch (_) {}
-          
-          widget.remove();
-          
+          const data = await parseJsonSafe(res);
+
           if (!res.ok || data.error) {
-            alert(data.error || `Upload failed (${res.status}). Try fewer files, or keep each image under 25MB.`);
-          } else {
+            alert(data.error || `Upload failed (HTTP ${res.status}).`);
+            uploadBtn.textContent = 'Add Page(s)';
+            uploadBtn.disabled = false;
+            return;
+          }
+          widget.remove();
+          try {
             await loadEditor(editingComicId);
-            if (data.count > 1) console.log(`Added ${data.count} pages via bulk`);
+          } catch (reloadErr) {
+            console.error(reloadErr);
+            alert('Images uploaded, but the editor failed to refresh. Close and reopen the story.');
           }
         } catch (e) {
-          alert('Upload failed. Try fewer files or smaller images (max 25MB each). Check your connection and try again.');
-          widget.remove();
+          console.error('Upload error:', e);
+          alert('Upload failed: ' + (e && e.message ? e.message : 'network or browser error') +
+            '. Check that you are logged in and try again.');
+          uploadBtn.textContent = 'Add Page(s)';
+          uploadBtn.disabled = false;
         }
       };
 

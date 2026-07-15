@@ -667,6 +667,11 @@ function requireVerified(req, res, next) {
   return res.status(403).json({ error: 'Please verify your email address first' });
 }
 
+// SQLite may return numbers while session ids are sometimes strings — never use !== alone
+function sameUserId(a, b) {
+  return a != null && b != null && Number(a) === Number(b);
+}
+
 function requireEditor(req, res, next) {
   const user = getCurrentUser(req);
   if (user && (user.role === 'editor' || user.role === 'admin')) {
@@ -1314,7 +1319,7 @@ app.get('/api/comics/:id/chapters', (req, res) => {
 app.post('/api/comics/:id/chapters', requireAuth, requireVerified, (req, res) => {
   const comicId = parseInt(req.params.id, 10);
   const comic = db.prepare('SELECT * FROM comics WHERE id = ?').get(comicId);
-  if (!comic || comic.user_id !== req.session.userId) {
+  if (!comic || !sameUserId(comic.user_id, req.session.userId)) {
     return res.status(403).json({ error: 'Not your comic' });
   }
   const title = (req.body.title || '').trim();
@@ -1614,7 +1619,7 @@ app.post('/api/comics/:id', requireAuth, requireVerified, (req, res) => {
   }
 
   const comic = db.prepare('SELECT * FROM comics WHERE id = ?').get(comicId);
-  if (!comic || comic.user_id !== req.session.userId) {
+  if (!comic || !sameUserId(comic.user_id, req.session.userId)) {
     return res.status(403).json({ error: 'Not your comic' });
   }
 
@@ -1661,7 +1666,7 @@ app.post('/api/comics/:id', requireAuth, requireVerified, (req, res) => {
 app.post('/api/comics/:id/cover', requireAuth, requireVerified, uploadSingle('cover'), async (req, res) => {
   const comicId = req.params.id;
   const comic = db.prepare('SELECT * FROM comics WHERE id = ?').get(comicId);
-  if (!comic || comic.user_id !== req.session.userId) {
+  if (!comic || !sameUserId(comic.user_id, req.session.userId)) {
     return res.status(403).json({ error: 'Not your comic' });
   }
   if (!req.file) {
@@ -1686,7 +1691,7 @@ app.post('/api/comics/:id/cover', requireAuth, requireVerified, uploadSingle('co
 app.post('/api/comics/:id/submit', requireAuth, requireVerified, (req, res) => {
   const comicId = req.params.id;
   const comic = db.prepare('SELECT * FROM comics WHERE id = ?').get(comicId);
-  if (!comic || comic.user_id !== req.session.userId) {
+  if (!comic || !sameUserId(comic.user_id, req.session.userId)) {
     return res.status(403).json({ error: 'Not your comic' });
   }
   if (comic.status !== 'draft' && comic.status !== 'changes_requested') {
@@ -1782,7 +1787,7 @@ app.post('/api/admin/review', requireAuth, requireEditor, async (req, res) => {
 app.post('/api/comics/:id/publish', requireAuth, requireVerified, (req, res) => {
   const comicId = req.params.id;
   const comic = db.prepare('SELECT * FROM comics WHERE id = ?').get(comicId);
-  if (!comic || comic.user_id !== req.session.userId) {
+  if (!comic || !sameUserId(comic.user_id, req.session.userId)) {
     return res.status(403).json({ error: 'Not your comic' });
   }
   if (comic.status !== 'approved') {
@@ -1845,85 +1850,95 @@ app.get('/api/comics/:id/pages', (req, res) => {
 
 // Upload a new page for a comic
 app.post('/api/comics/:comicId/pages', requireAuth, requireVerified, uploadSingle('image'), async (req, res) => {
-  const comicId = req.params.comicId;
-  const { title = '', text_content = '', is_start = '0' } = req.body;
+  try {
+    const comicId = req.params.comicId;
+    const { title = '', text_content = '', is_start = '0' } = req.body;
 
-  // Verify ownership
-  const comic = db.prepare('SELECT user_id FROM comics WHERE id = ?').get(comicId);
-  if (!comic || comic.user_id !== req.session.userId) {
-    return res.status(403).json({ error: 'Not your comic' });
+    // Verify ownership
+    const comic = db.prepare('SELECT user_id FROM comics WHERE id = ?').get(comicId);
+    if (!comic || !sameUserId(comic.user_id, req.session.userId)) {
+      return res.status(403).json({ error: 'Not your comic' });
+    }
+
+    let imagePath = null;
+    if (req.file) {
+      const filename = generateImageFilename(req.file.originalname);
+      const key = `comics/${comicId}/${filename}`;
+      await storageService.upload(req.file.buffer, key);
+      imagePath = storageService.getPublicUrl(key);
+    }
+
+    const result = db.prepare(`
+      INSERT INTO pages (comic_id, title, image_path, text_content, is_start)
+      VALUES (?, ?, ?, ?, ?)
+    `).run(comicId, title, imagePath, text_content, is_start === '1' || is_start === 'true' ? 1 : 0);
+
+    // If this is marked start, unmark any other starts
+    if (is_start === '1' || is_start === 'true') {
+      db.prepare('UPDATE pages SET is_start = 0 WHERE comic_id = ? AND id != ?')
+        .run(comicId, result.lastInsertRowid);
+    }
+
+    const page = db.prepare('SELECT * FROM pages WHERE id = ?').get(result.lastInsertRowid);
+    res.status(201).json(page);
+  } catch (err) {
+    console.error('Page upload failed:', err);
+    res.status(500).json({ error: 'Server failed to save the image. Check disk permissions on uploads/.' });
   }
-
-  let imagePath = null;
-  if (req.file) {
-    const filename = generateImageFilename(req.file.originalname);
-    const key = `comics/${comicId}/${filename}`;
-    await storageService.upload(req.file.buffer, key);
-    imagePath = storageService.getPublicUrl(key);
-  }
-
-  const result = db.prepare(`
-    INSERT INTO pages (comic_id, title, image_path, text_content, is_start)
-    VALUES (?, ?, ?, ?, ?)
-  `).run(comicId, title, imagePath, text_content, is_start === '1' || is_start === 'true' ? 1 : 0);
-
-  // If this is marked start, unmark any other starts
-  if (is_start === '1' || is_start === 'true') {
-    db.prepare('UPDATE pages SET is_start = 0 WHERE comic_id = ? AND id != ?')
-      .run(comicId, result.lastInsertRowid);
-  }
-
-  const page = db.prepare('SELECT * FROM pages WHERE id = ?').get(result.lastInsertRowid);
-  res.status(201).json(page);
 });
 
 // Bulk upload multiple pages (for mass image uploads when creating/editing stories)
 app.post('/api/comics/:comicId/pages/bulk', requireAuth, requireVerified, uploadArray('images', MAX_BULK_FILES), async (req, res) => {
-  const comicId = req.params.comicId;
-  const files = req.files || [];
+  try {
+    const comicId = req.params.comicId;
+    const files = req.files || [];
 
-  if (!files.length) {
-    return res.status(400).json({ error: 'No images provided' });
+    if (!files.length) {
+      return res.status(400).json({ error: 'No images provided' });
+    }
+
+    // Total size safeguard for mass uploads
+    const totalSize = files.reduce((sum, f) => sum + (f.size || 0), 0);
+    if (totalSize > MAX_BULK_TOTAL_BYTES) {
+      return res.status(413).json({
+        error: `Total upload exceeds ${MAX_BULK_TOTAL_BYTES / (1024 * 1024)}MB for this batch. Upload in smaller groups.`
+      });
+    }
+
+    // Verify ownership
+    const comic = db.prepare('SELECT user_id FROM comics WHERE id = ?').get(comicId);
+    if (!comic || !sameUserId(comic.user_id, req.session.userId)) {
+      return res.status(403).json({ error: 'Not your comic' });
+    }
+
+    const inserted = [];
+    const { title_prefix = '' } = req.body;
+
+    for (const file of files) {
+      const filename = generateImageFilename(file.originalname);
+      const key = `comics/${comicId}/${filename}`;
+      await storageService.upload(file.buffer, key);
+      const imagePath = storageService.getPublicUrl(key);
+
+      // Derive a nice title from original filename or use prefix + index
+      let baseTitle = file.originalname ? path.parse(file.originalname).name : `Page`;
+      baseTitle = baseTitle.replace(/[-_]+/g, ' ').replace(/\s+/g, ' ').trim();
+      const title = title_prefix ? `${title_prefix} ${baseTitle}` : (baseTitle || `Page`);
+
+      const result = db.prepare(`
+        INSERT INTO pages (comic_id, title, image_path, text_content, is_start)
+        VALUES (?, ?, ?, ?, 0)
+      `).run(comicId, title, imagePath, ''); // text empty for bulk; user can edit later
+
+      const newPage = db.prepare('SELECT * FROM pages WHERE id = ?').get(result.lastInsertRowid);
+      inserted.push(newPage);
+    }
+
+    res.status(201).json({ pages: inserted, count: inserted.length });
+  } catch (err) {
+    console.error('Bulk page upload failed:', err);
+    res.status(500).json({ error: 'Server failed to save images. Check disk permissions on uploads/.' });
   }
-
-  // Total size safeguard for mass uploads
-  const totalSize = files.reduce((sum, f) => sum + (f.size || 0), 0);
-  if (totalSize > MAX_BULK_TOTAL_BYTES) {
-    return res.status(413).json({
-      error: `Total upload exceeds ${MAX_BULK_TOTAL_BYTES / (1024 * 1024)}MB for this batch. Upload in smaller groups.`
-    });
-  }
-
-  // Verify ownership
-  const comic = db.prepare('SELECT user_id FROM comics WHERE id = ?').get(comicId);
-  if (!comic || comic.user_id !== req.session.userId) {
-    return res.status(403).json({ error: 'Not your comic' });
-  }
-
-  const inserted = [];
-  const { title_prefix = '' } = req.body;
-
-  for (const file of files) {
-    const filename = generateImageFilename(file.originalname);
-    const key = `comics/${comicId}/${filename}`;
-    await storageService.upload(file.buffer, key);
-    const imagePath = storageService.getPublicUrl(key);
-
-    // Derive a nice title from original filename or use prefix + index
-    let baseTitle = file.originalname ? path.parse(file.originalname).name : `Page`;
-    baseTitle = baseTitle.replace(/[-_]+/g, ' ').replace(/\s+/g, ' ').trim();
-    const title = title_prefix ? `${title_prefix} ${baseTitle}` : (baseTitle || `Page`);
-
-    const result = db.prepare(`
-      INSERT INTO pages (comic_id, title, image_path, text_content, is_start)
-      VALUES (?, ?, ?, ?, 0)
-    `).run(comicId, title, imagePath, ''); // text empty for bulk; user can edit later
-
-    const newPage = db.prepare('SELECT * FROM pages WHERE id = ?').get(result.lastInsertRowid);
-    inserted.push(newPage);
-  }
-
-  res.status(201).json({ pages: inserted, count: inserted.length });
 });
 
 // Update an existing page's title, caption/text, and optionally the image
@@ -1937,7 +1952,7 @@ app.post('/api/pages/:pageId', requireAuth, requireVerified, uploadSingle('image
     WHERE p.id = ?
   `).get(pageId);
 
-  if (!page || page.user_id !== req.session.userId) {
+  if (!page || !sameUserId(page.user_id, req.session.userId)) {
     return res.status(403).json({ error: 'Not allowed' });
   }
 
@@ -1975,7 +1990,7 @@ app.post('/api/pages/:pageId/choices', requireAuth, requireVerified, resolveComi
     WHERE p.id = ?
   `).get(fromPageId);
 
-  if (!fromPage || fromPage.user_id !== req.session.userId) {
+  if (!fromPage || !sameUserId(fromPage.user_id, req.session.userId)) {
     return res.status(403).json({ error: 'Not allowed' });
   }
 
@@ -2014,7 +2029,7 @@ app.delete('/api/pages/:pageId', requireAuth, (req, res) => {
     WHERE p.id = ?
   `).get(req.params.pageId);
 
-  if (!page || page.user_id !== req.session.userId) {
+  if (!page || !sameUserId(page.user_id, req.session.userId)) {
     return res.status(403).json({ error: 'Not allowed' });
   }
 
@@ -2031,7 +2046,7 @@ app.post('/api/pages/:pageId/set-start', requireAuth, requireVerified, (req, res
     WHERE p.id = ?
   `).get(pageId);
 
-  if (!page || page.user_id !== req.session.userId) {
+  if (!page || !sameUserId(page.user_id, req.session.userId)) {
     return res.status(403).json({ error: 'Not allowed' });
   }
 
@@ -2064,7 +2079,7 @@ app.post('/api/pages/:pageId/set-choices', requireAuth, requireVerified, (req, r
     WHERE p.id = ?
   `).get(fromPageId);
 
-  if (!fromPage || fromPage.user_id !== req.session.userId) {
+  if (!fromPage || !sameUserId(fromPage.user_id, req.session.userId)) {
     return res.status(403).json({ error: 'Not allowed' });
   }
 
@@ -2117,7 +2132,7 @@ app.post('/api/pages/:pageId/choice-labels', requireAuth, requireVerified, (req,
     WHERE p.id = ?
   `).get(fromPageId);
 
-  if (!fromPage || fromPage.user_id !== req.session.userId) {
+  if (!fromPage || !sameUserId(fromPage.user_id, req.session.userId)) {
     return res.status(403).json({ error: 'Not allowed' });
   }
 
