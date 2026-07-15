@@ -6,19 +6,7 @@
   <title>Pick Your Path Stories</title>
   <link rel="stylesheet" href="/css/tailwind.css">
 
-  <!-- Google AdSense script for limited ads on FREE stories only.
-       Revenue goes 100% to your AdSense account (platform), not creators.
-       Steps:
-       1. Sign up / apply at https://www.google.com/adsense/
-       2. Verify your site (add meta tag or file upload)
-       3. Create ad unit(s) - recommend "In-article" or "Display" responsive, limited placements
-       4. Get your ca-pub-XXXX client ID and ad slot ID
-       5. Uncomment the script below, replace YOUR_PUBLISHER_ID
-       6. Update the data-ad- values in the JS ad injection in app.js
-       Ads will only appear on free (price=0) stories for non-owners, only on the first page.
-  -->
-  <!-- <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-YOUR_PUBLISHER_ID"
-          crossorigin="anonymous"></script> -->
+  <!-- AdSense script is injected by app.js when ADSENSE_* is set on the server. -->
 
   <style>
     :root { --accent: #3b82f6; }
@@ -346,10 +334,8 @@
 
           <div id="reader-text" class="story-text text-slate-200 whitespace-pre-line leading-relaxed"></div>
 
-          <!-- Limited ads for free stories only (platform revenue) -->
-          <div id="reader-ad" class="my-6 text-center hidden">
-            <!-- AdSense unit will be injected here for free stories -->
-          </div>
+          <!-- Max 1 AdSense unit per reader page (between text and choices) -->
+          <div id="reader-ad" class="my-6 text-center hidden" aria-label="Advertisement"></div>
         </div>
       </div>
 

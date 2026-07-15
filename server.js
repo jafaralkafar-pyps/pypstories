@@ -57,12 +57,33 @@ app.use(helmet({
         useDefaults: true,
         directives: {
           // Allow same-origin CSS/JS plus the large inline <style> block in index.html
-          "style-src": ["'self'", "'unsafe-inline'"],
-          "script-src": ["'self'"],
+          "style-src": ["'self'", "'unsafe-inline'", "https://www.googletagservices.com"],
+          "script-src": [
+            "'self'",
+            "https://pagead2.googlesyndication.com",
+            "https://www.googletagservices.com",
+            "https://adservice.google.com",
+            "https://www.google.com",
+            "https://www.gstatic.com",
+          ],
           // HTML uses many onclick="..." handlers; Helmet default is script-src-attr 'none'
           // which makes buttons appear dead (e.g. Log in does nothing).
           "script-src-attr": ["'unsafe-inline'"],
-          "img-src": ["'self'", "data:", "blob:"],
+          "img-src": ["'self'", "data:", "blob:", "https:"],
+          "frame-src": [
+            "'self'",
+            "https://googleads.g.doubleclick.net",
+            "https://tpc.googlesyndication.com",
+            "https://www.google.com",
+            "https://pagead2.googlesyndication.com",
+          ],
+          "connect-src": [
+            "'self'",
+            "https://pagead2.googlesyndication.com",
+            "https://googleads.g.doubleclick.net",
+            "https://www.google.com",
+            "https://adservice.google.com",
+          ],
           // Disable forced HTTPS upgrades until the public URL is HTTPS
           ...(appUrlIsHttps ? {} : { "upgrade-insecure-requests": null }),
         },
@@ -1463,6 +1484,20 @@ app.post('/api/creator/payout', requireAuth, requireVerified, async (req, res) =
   } catch (e) {
     res.status(400).json({ error: e.message || 'Payout failed' });
   }
+});
+
+// Public client config (AdSense IDs are meant to be public in page source)
+app.get('/api/public-config', (req, res) => {
+  const client = (process.env.ADSENSE_CLIENT_ID || '').trim();
+  const slot = (process.env.ADSENSE_SLOT_ID || '').trim();
+  const enabled = process.env.ADSENSE_ENABLED !== 'false' && !!client && !!slot;
+  res.json({
+    adsense: {
+      enabled,
+      client,
+      slot,
+    },
+  });
 });
 
 // === COMICS ROUTES ===

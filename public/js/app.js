@@ -12,6 +12,94 @@
     let allComics = [];
     let previousView = 'home'; // for restoring after reader or editor
     let catalogMode = 'home'; // 'home' (hero) or 'browse' (no hero)
+    let adsenseConfig = { enabled: false, client: '', slot: '' };
+    let adsenseScriptLoading = null;
+
+    async function loadPublicConfig() {
+      try {
+        const res = await fetch('/api/public-config');
+        const data = await res.json();
+        if (data && data.adsense) {
+          adsenseConfig = {
+            enabled: !!data.adsense.enabled,
+            client: data.adsense.client || '',
+            slot: data.adsense.slot || '',
+          };
+        }
+      } catch (e) {
+        console.warn('[Ads] public-config failed', e);
+      }
+    }
+
+    function ensureAdSenseScript() {
+      if (!adsenseConfig.enabled || !adsenseConfig.client) return Promise.resolve(false);
+      if (window.adsbygoogle && document.querySelector('script[data-adsense-loader]')) {
+        return Promise.resolve(true);
+      }
+      if (adsenseScriptLoading) return adsenseScriptLoading;
+
+      adsenseScriptLoading = new Promise((resolve) => {
+        const existing = document.querySelector('script[data-adsense-loader]');
+        if (existing) {
+          existing.addEventListener('load', () => resolve(true));
+          existing.addEventListener('error', () => resolve(false));
+          if (window.adsbygoogle) resolve(true);
+          return;
+        }
+        const s = document.createElement('script');
+        s.async = true;
+        s.src = `https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=${encodeURIComponent(adsenseConfig.client)}`;
+        s.crossOrigin = 'anonymous';
+        s.dataset.adsenseLoader = '1';
+        s.onload = () => resolve(true);
+        s.onerror = () => resolve(false);
+        document.head.appendChild(s);
+      });
+      return adsenseScriptLoading;
+    }
+
+    /**
+     * Exactly one AdSense unit in the reader, refreshed when the reader page changes.
+     * Hidden for story owners and when AdSense is not configured.
+     */
+    async function updateReaderAd() {
+      const adContainer = document.getElementById('reader-ad');
+      if (!adContainer) return;
+
+      const isOwner = currentUser && readerComic && (
+        readerComic.author === currentUser.username ||
+        Number(readerComic.user_id) === Number(currentUser.id)
+      );
+
+      if (!adsenseConfig.enabled || !adsenseConfig.client || !adsenseConfig.slot || isOwner) {
+        adContainer.classList.add('hidden');
+        adContainer.innerHTML = '';
+        return;
+      }
+
+      const ready = await ensureAdSenseScript();
+      adContainer.classList.remove('hidden');
+      // New <ins> each page so AdSense treats each reader page as one unit
+      adContainer.innerHTML = `
+        <div class="text-[10px] text-slate-500 mb-1.5">Advertisement</div>
+        <ins class="adsbygoogle"
+             style="display:block;min-height:100px;background:#0f172a;border-radius:12px;"
+             data-ad-client="${adsenseConfig.client}"
+             data-ad-slot="${adsenseConfig.slot}"
+             data-ad-format="auto"
+             data-full-width-responsive="true"></ins>
+      `;
+
+      if (!ready) {
+        console.warn('[Ads] AdSense script not loaded yet');
+        return;
+      }
+      try {
+        (window.adsbygoogle = window.adsbygoogle || []).push({});
+      } catch (e) {
+        console.warn('[Ads] push failed', e);
+      }
+    }
 
     function hideMainViews() {
       ['view-catalog', 'view-my-comics', 'view-admin-reviews', 'view-account'].forEach(id => {
@@ -2816,34 +2904,8 @@
 
       const isFirstPage = !!page.is_start;
 
-      // Limited ads ONLY on free stories for non-owners (platform keeps all ad revenue)
-      const adContainer = document.getElementById('reader-ad');
-      if (adContainer) {
-        const isFreeStory = !readerComic || !readerComic.price;
-        const isOwner = currentUser && readerComic && readerComic.author === currentUser.username;
-        if (isFreeStory && !isOwner && isFirstPage) {
-          // Show only on the very first page of free stories to keep it limited
-          adContainer.classList.remove('hidden');
-          if (!adContainer.querySelector('.adsbygoogle')) {
-            adContainer.innerHTML = `
-              <div class="text-[10px] text-slate-500 mb-1">Sponsored (limited ads on free stories)</div>
-              <ins class="adsbygoogle"
-                   style="display:block; min-height:90px; background:#1e2937; border-radius:8px;"
-                   data-ad-client="ca-pub-YOUR_PUBLISHER_ID_HERE"
-                   data-ad-slot="YOUR_AD_SLOT_HERE"
-                   data-ad-format="auto"
-                   data-full-width-responsive="true"></ins>
-            `;
-            try {
-              (adsbygoogle = window.adsbygoogle || []).push({});
-            } catch (e) {
-              console.log('[Ads] AdSense not loaded yet - replace placeholders and enable script in <head>');
-            }
-          }
-        } else {
-          adContainer.classList.add('hidden');
-        }
-      }
+      // Exactly one ad unit per reader page (between text and choices)
+      updateReaderAd();
 
       // Reset scroll to top on every page change (choices, back, restart, etc.)
       const scrollContainer = document.getElementById('reader-scroll');
@@ -3117,6 +3179,7 @@
     // Init
     async function init() {
       initTailwind();
+      await loadPublicConfig();
       
       const urlParams = new URLSearchParams(window.location.search);
       
