@@ -2033,10 +2033,6 @@
             saveQueued = false;
             const pageIdToSave = focusedPageId;
             const { choices: chosen, labels: labelsOnly } = getChosenPayload();
-            console.log('[structure] saving page', pageIdToSave);
-            console.log('[structure] texts being sent:', chosen.map(c => c.text));
-            console.log('[structure] labels array:', labelsOnly);
-            console.log('[structure] input values:', labelInputs.map(el => (el ? el.value : null)));
 
             const r = await fetch(`/api/pages/${pageIdToSave}/set-choices`, {
               method: 'POST',
@@ -2066,15 +2062,13 @@
                 credentials: 'same-origin',
                 body: JSON.stringify({ labels: labelPayload })
               });
-              const body2 = await r2.json().catch(() => ({}));
-              console.log('[structure] choice-labels result', body2);
+              await r2.json().catch(() => ({}));
             } catch (e2) {
               console.warn('choice-labels secondary save failed', e2);
             }
 
             // Prefer server echo of saved labels when present
             const savedChoices = Array.isArray(body.choices) ? body.choices : chosen;
-            console.log('[structure] server returned texts:', savedChoices.map(c => c.text));
             const page = currentPages.find(pp => Number(pp.id) === Number(pageIdToSave));
             if (page) {
               page.choices = savedChoices.map(c => ({
@@ -2367,17 +2361,14 @@
       saveBtn.onclick = async () => {
         clearTimeout(labelSaveTimer);
         captureAllLabels();
-        console.log('[structure] labelInputs values', labelInputs.map(el => el ? el.value : null));
-        console.log('[structure] drafts', JSON.parse(JSON.stringify(draftsFor(focusedPageId))));
         const ok = await saveCurrentStructure(false);
         if (ok) {
           await refreshPagesFromServer();
           const p = currentPages.find(pp => Number(pp.id) === Number(focusedPageId));
           const labels = (p && p.choices) ? p.choices.map(c => c.text || c.choice_text || '') : [];
-          console.log('[structure] verified labels after save:', labels);
           setStatus(labels.some(Boolean) ? 'Saved (labels OK)' : 'Saved — labels empty!', labels.some(Boolean) ? 'ok' : 'err');
           if (!labels.some(Boolean)) {
-            alert('Labels did not save. Open the browser console (F12) and check the [structure] logs, or try typing a label and pressing Enter.');
+            alert('Labels did not save. Try typing a label and pressing Enter, then Save again.');
           }
         }
       };
@@ -3331,8 +3322,6 @@
 
       // Show landing page by default
       showHome();
-      
-      console.log('%c[Pick Your Path Stories] Ready at PYPStories.com — data stored locally on E: drive.', 'color:#64748b');
     }
 
     // Expose handlers used by inline onclick attributes
