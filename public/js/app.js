@@ -652,9 +652,13 @@
             
             <div class="flex-1"></div>
             
-            <div class="flex justify-between items-center text-xs pt-3 border-t border-slate-800 mt-2 text-slate-400">
-              <div>${comic.page_count || 0} pages</div>
-              <div>${comic.price || (comic.price_cents ? '$' + (comic.price_cents/100).toFixed(2) : 'Free')}</div>
+            <div class="flex justify-between items-center text-xs pt-3 border-t border-slate-800 mt-2 text-slate-400 gap-2">
+              <div class="truncate">${comic.page_count || 0} pages · ${comic.view_count || 0} views</div>
+              <div class="flex-shrink-0 text-right">
+                <span class="text-amber-300/90">${comic.avg_rating != null ? '★ ' + comic.avg_rating : '★ —'}</span>
+                <span class="text-slate-500">${comic.rating_count ? ' (' + comic.rating_count + ')' : ''}</span>
+                <span class="ml-1.5">${comic.price || (comic.price_cents ? '$' + (comic.price_cents/100).toFixed(2) : 'Free')}</span>
+              </div>
             </div>
           </div>
         `;
@@ -725,8 +729,10 @@
           <div class="font-semibold text-xl">${comic.title}</div>
           <div class="text-sm text-slate-400 mt-0.5">${comic.genre} • ${comic.page_count || 0} pages ${comic.price ? '• $' + comic.price : '• Free'}</div>
           <div class="mt-1 text-xs ${status === 'published' ? 'text-green-400' : status === 'approved' ? 'text-blue-400' : 'text-amber-400'}">Status: ${statusText}</div>
-          <div class="mt-4 text-xs flex gap-3 text-slate-400">
+          <div class="mt-4 text-xs flex flex-wrap gap-3 text-slate-400">
             <span>${comic.view_count || 0} views</span>
+            <span class="text-amber-300/90">${comic.avg_rating != null ? '★ ' + comic.avg_rating : 'No ratings'}${comic.rating_count ? ' (' + comic.rating_count + ')' : ''}</span>
+            <span>${comic.comment_count || 0} comments</span>
           </div>
           <div class="mt-5 flex gap-2 text-sm">
             <button class="flex-1 py-2 bg-slate-800 hover:bg-slate-700 rounded-2xl text-xs sm:text-sm" data-action="edit">Edit</button>
@@ -2348,8 +2354,188 @@
     let pageHistory = [];
 
     // === COMIC INFO MODAL (title + description shown first on browse) ===
+    let infoModalComicId = null;
+    let infoModalChapters = [];
+
+    function escapeHtml(str) {
+      return String(str || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+
+    function formatStars(avg, count) {
+      if (avg == null || count === 0) return 'No ratings yet';
+      return `★ ${avg} (${count} rating${count === 1 ? '' : 's'})`;
+    }
+
+    function renderStarButtons(container, myRating, onPick) {
+      if (!container) return;
+      container.innerHTML = '';
+      for (let i = 1; i <= 5; i++) {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'text-2xl leading-none px-0.5 transition ' +
+          (myRating && i <= myRating ? 'text-amber-400' : 'text-slate-600 hover:text-amber-300');
+        btn.textContent = '★';
+        btn.setAttribute('aria-label', i + ' stars');
+        btn.onclick = (e) => {
+          e.stopPropagation();
+          onPick(i);
+        };
+        container.appendChild(btn);
+      }
+    }
+
+    async function loadInfoFeedback(comicId) {
+      const targetSel = document.getElementById('info-feedback-target');
+      const chapterId = targetSel ? parseInt(targetSel.value, 10) || 0 : 0;
+      const hint = document.getElementById('info-rating-hint');
+      const starBox = document.getElementById('info-star-buttons');
+      const list = document.getElementById('info-comments-list');
+      const badge = document.getElementById('info-rating-badge');
+
+      try {
+        const res = await fetch(`/api/comics/${comicId}/feedback?chapter_id=${chapterId}`);
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Failed to load feedback');
+
+        const storyAvg = data.story && data.story.avg_rating;
+        const storyCount = (data.story && data.story.rating_count) || 0;
+        if (badge) badge.textContent = formatStars(storyAvg, storyCount);
+
+        const activeAvg = chapterId > 0 && data.chapter
+          ? data.chapter.avg_rating
+          : storyAvg;
+        const activeCount = chapterId > 0 && data.chapter
+          ? data.chapter.rating_count
+          : storyCount;
+
+        if (hint) {
+          if (!currentUser) {
+            hint.textContent = 'Log in to rate and comment.';
+          } else {
+            const scope = chapterId > 0 ? 'this chapter' : 'this story';
+            hint.textContent = data.my_rating
+              ? `You rated ${scope} ${data.my_rating}/5 · Average ${activeAvg != null ? activeAvg : '—'} (${activeCount})`
+              : `Tap a star to rate ${scope}. Average ${activeAvg != null ? activeAvg : '—'} (${activeCount})`;
+          }
+        }
+
+        renderStarButtons(starBox, data.my_rating, async (stars) => {
+          if (!currentUser) {
+            closeComicInfo();
+            showAuthModal('login');
+            return;
+          }
+          const r = await fetch(`/api/comics/${comicId}/rate`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'same-origin',
+            body: JSON.stringify({ stars, chapter_id: chapterId }),
+          });
+          const d = await r.json();
+          if (!r.ok) {
+            alert(d.error || 'Could not save rating');
+            return;
+          }
+          await loadInfoFeedback(comicId);
+        });
+
+        if (list) {
+          list.innerHTML = '';
+          const comments = data.comments || [];
+          if (!comments.length) {
+            list.innerHTML = '<div class="text-xs text-slate-500 py-2">No comments yet. Be the first!</div>';
+          } else {
+            comments.forEach(c => {
+              const row = document.createElement('div');
+              row.className = 'border border-slate-800 rounded-xl px-3 py-2 bg-slate-950/50';
+              const when = c.created_at ? new Date(c.created_at).toLocaleDateString() : '';
+              const chLabel = c.chapter_id
+                ? (infoModalChapters.find(ch => Number(ch.id) === Number(c.chapter_id))?.title || ('Chapter ' + c.chapter_id))
+                : 'Story';
+              const canDelete = currentUser && (
+                Number(currentUser.id) === Number(c.user_id) ||
+                currentUser.role === 'admin' ||
+                currentUser.role === 'editor'
+              );
+              row.innerHTML = `
+                <div class="flex justify-between gap-2 text-[11px] text-slate-500 mb-1">
+                  <span><span class="text-slate-300 font-medium">${escapeHtml(c.username)}</span> · ${escapeHtml(chLabel)} · ${escapeHtml(when)}</span>
+                  ${canDelete ? `<button type="button" class="text-red-400 hover:text-red-300" data-del-comment="${c.id}">Delete</button>` : ''}
+                </div>
+                <div class="text-slate-200 whitespace-pre-wrap break-words">${escapeHtml(c.body)}</div>
+              `;
+              const del = row.querySelector('[data-del-comment]');
+              if (del) {
+                del.onclick = async () => {
+                  if (!confirm('Delete this comment?')) return;
+                  const dr = await fetch(`/api/comments/${c.id}`, { method: 'DELETE', credentials: 'same-origin' });
+                  if (!dr.ok) {
+                    const dd = await dr.json().catch(() => ({}));
+                    alert(dd.error || 'Delete failed');
+                    return;
+                  }
+                  await loadInfoFeedback(comicId);
+                };
+              }
+              list.appendChild(row);
+            });
+          }
+        }
+      } catch (e) {
+        console.error(e);
+        if (list) list.innerHTML = '<div class="text-xs text-red-400">Could not load comments.</div>';
+      }
+    }
+
+    function wireInfoFeedbackControls(comicId) {
+      const targetSel = document.getElementById('info-feedback-target');
+      if (targetSel) {
+        targetSel.onchange = () => loadInfoFeedback(comicId);
+      }
+      const submitBtn = document.getElementById('info-comment-submit');
+      const bodyEl = document.getElementById('info-comment-body');
+      if (submitBtn) {
+        submitBtn.onclick = async () => {
+          if (!currentUser) {
+            closeComicInfo();
+            showAuthModal('login');
+            return;
+          }
+          const body = (bodyEl && bodyEl.value || '').trim();
+          if (body.length < 2) {
+            alert('Write a short comment first.');
+            return;
+          }
+          const chapterId = targetSel ? parseInt(targetSel.value, 10) || 0 : 0;
+          submitBtn.disabled = true;
+          try {
+            const r = await fetch(`/api/comics/${comicId}/comments`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              credentials: 'same-origin',
+              body: JSON.stringify({ body, chapter_id: chapterId }),
+            });
+            const d = await r.json();
+            if (!r.ok) {
+              alert(d.error || 'Could not post comment');
+              return;
+            }
+            if (bodyEl) bodyEl.value = '';
+            await loadInfoFeedback(comicId);
+          } finally {
+            submitBtn.disabled = false;
+          }
+        };
+      }
+    }
+
     async function showComicInfo(comicId) {
       comicId = Number(comicId);
+      infoModalComicId = comicId;
       const res = await fetch(`/api/comics/${comicId}`);
       const comic = await res.json();
 
@@ -2375,6 +2561,13 @@
         priceEl.textContent = 'Yours';
       } else {
         priceEl.textContent = 'Free (limited ads)';
+      }
+
+      const viewsEl = document.getElementById('info-views');
+      if (viewsEl) viewsEl.textContent = `${comic.view_count || 0} views`;
+      const ratingBadge = document.getElementById('info-rating-badge');
+      if (ratingBadge) {
+        ratingBadge.textContent = formatStars(comic.avg_rating, comic.rating_count || 0);
       }
 
       // Description - enforce short (≤ 240 words)
@@ -2416,12 +2609,26 @@
         }
       }
 
-      // Chapters list
+      // Chapters list + feedback target dropdown
       const chWrap = document.getElementById('info-chapters-wrap');
       const chList = document.getElementById('info-chapters-list');
+      const feedbackTarget = document.getElementById('info-feedback-target');
+      infoModalChapters = [];
+      if (feedbackTarget) {
+        feedbackTarget.innerHTML = '<option value="0">Whole story</option>';
+      }
       try {
         const chRes = await fetch(`/api/comics/${comicId}/chapters`);
         const chapters = await chRes.json();
+        infoModalChapters = Array.isArray(chapters) ? chapters : [];
+        if (feedbackTarget && infoModalChapters.length) {
+          infoModalChapters.forEach(ch => {
+            const opt = document.createElement('option');
+            opt.value = String(ch.id);
+            opt.textContent = ch.title || ('Chapter ' + ch.id);
+            feedbackTarget.appendChild(opt);
+          });
+        }
         if (chapters.length && chWrap && chList) {
           chWrap.classList.remove('hidden');
           chList.innerHTML = chapters.map(ch => {
@@ -2431,13 +2638,13 @@
               ? `<button type="button" class="text-xs px-2 py-1 bg-emerald-700 hover:bg-emerald-600 rounded-lg" data-unlock-ch="${ch.id}">Unlock</button>`
               : `<span class="text-xs text-slate-500">${status}</span>`;
             return `<div class="flex items-center justify-between gap-2 bg-slate-950 border border-slate-800 rounded-xl px-2.5 py-1.5 text-sm">
-              <span>${ch.title}</span>
+              <span>${escapeHtml(ch.title)}</span>
               ${btn}
             </div>`;
           }).join('');
           chList.querySelectorAll('[data-unlock-ch]').forEach(btn => {
             btn.onclick = async () => {
-              if (!currentUser) { closeComicInfo(); showAuthModal(); return; }
+              if (!currentUser) { closeComicInfo(); showAuthModal('login'); return; }
               const id = btn.getAttribute('data-unlock-ch');
               const r = await fetch(`/api/chapters/${id}/unlock`, { method: 'POST' });
               const d = await r.json();
@@ -2463,6 +2670,9 @@
       } catch (e) {
         if (chWrap) chWrap.classList.add('hidden');
       }
+
+      wireInfoFeedbackControls(comicId);
+      await loadInfoFeedback(comicId);
 
       if (isOwner) {
         // Creator - full access, no ads

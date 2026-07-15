@@ -251,6 +251,36 @@ try {
   db.exec(`ALTER TABLE choices ADD COLUMN choice_image TEXT`);
 } catch (e) {}
 
+// Ratings & comments (chapter_id = 0 means whole story)
+db.exec(`
+  CREATE TABLE IF NOT EXISTS story_ratings (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    comic_id INTEGER NOT NULL,
+    chapter_id INTEGER NOT NULL DEFAULT 0,
+    stars INTEGER NOT NULL,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(user_id, comic_id, chapter_id),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (comic_id) REFERENCES comics(id) ON DELETE CASCADE
+  );
+
+  CREATE TABLE IF NOT EXISTS story_comments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    comic_id INTEGER NOT NULL,
+    chapter_id INTEGER NOT NULL DEFAULT 0,
+    body TEXT NOT NULL,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (comic_id) REFERENCES comics(id) ON DELETE CASCADE
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_story_ratings_comic ON story_ratings(comic_id, chapter_id);
+  CREATE INDEX IF NOT EXISTS idx_story_comments_comic ON story_comments(comic_id, chapter_id, created_at);
+`);
+
 // Credits wallet, chapters, creator earnings
 credits.initCreditSchema(db);
 
@@ -1446,7 +1476,10 @@ app.get('/api/comics', (req, res) => {
   let sql = `
     SELECT c.*, u.username as author,
       (SELECT COUNT(*) FROM pages WHERE comic_id = c.id) as page_count,
-      c.status
+      c.status,
+      (SELECT AVG(stars * 1.0) FROM story_ratings WHERE comic_id = c.id AND chapter_id = 0) as avg_rating,
+      (SELECT COUNT(*) FROM story_ratings WHERE comic_id = c.id AND chapter_id = 0) as rating_count,
+      (SELECT COUNT(*) FROM story_comments WHERE comic_id = c.id) as comment_count
     FROM comics c
     JOIN users u ON u.id = c.user_id
   `;
@@ -1471,6 +1504,8 @@ app.get('/api/comics', (req, res) => {
 
   if (sort === 'popular') {
     sql += ` ORDER BY c.view_count DESC, c.created_at DESC`;
+  } else if (sort === 'rating') {
+    sql += ` ORDER BY avg_rating DESC NULLS LAST, rating_count DESC, c.created_at DESC`;
   } else if (sort === 'price') {
     sql += ` ORDER BY c.price_cents ASC, c.title COLLATE NOCASE ASC`;
   } else if (sort === 'title') {
@@ -1480,9 +1515,25 @@ app.get('/api/comics', (req, res) => {
     sql += ` ORDER BY c.submitted_at DESC, c.created_at DESC`;
   }
 
-  const comics = db.prepare(sql).all(...params);
+  let comics;
+  try {
+    comics = db.prepare(sql).all(...params);
+  } catch (e) {
+    // Older SQLite without NULLS LAST
+    if (sort === 'rating') {
+      sql = sql.replace(' ORDER BY avg_rating DESC NULLS LAST, rating_count DESC, c.created_at DESC',
+        ' ORDER BY (avg_rating IS NULL), avg_rating DESC, rating_count DESC, c.created_at DESC');
+      comics = db.prepare(sql).all(...params);
+    } else {
+      throw e;
+    }
+  }
   comics.forEach(c => {
     c.price = c.price_cents ? (c.price_cents / 100).toFixed(2) : null;
+    c.avg_rating = c.avg_rating != null ? Math.round(Number(c.avg_rating) * 10) / 10 : null;
+    c.rating_count = Number(c.rating_count) || 0;
+    c.comment_count = Number(c.comment_count) || 0;
+    c.view_count = Number(c.view_count) || 0;
     // Fallback thumbnail: first page image if no cover uploaded
     if (!c.cover_image) {
       const first = db.prepare(`
@@ -1527,7 +1578,198 @@ app.get('/api/comics/:id', (req, res) => {
   comic.hasStart = pages.some(p => p.is_start);
   comic.price = comic.price_cents ? (comic.price_cents / 100).toFixed(2) : null;
 
+  const ratingRow = db.prepare(`
+    SELECT AVG(stars * 1.0) as avg_rating, COUNT(*) as rating_count
+    FROM story_ratings WHERE comic_id = ? AND chapter_id = 0
+  `).get(comic.id);
+  comic.avg_rating = ratingRow && ratingRow.avg_rating != null
+    ? Math.round(Number(ratingRow.avg_rating) * 10) / 10
+    : null;
+  comic.rating_count = ratingRow ? (Number(ratingRow.rating_count) || 0) : 0;
+  comic.comment_count = db.prepare(
+    `SELECT COUNT(*) as n FROM story_comments WHERE comic_id = ?`
+  ).get(comic.id).n || 0;
+
+  if (currentUser) {
+    const mine = db.prepare(`
+      SELECT stars FROM story_ratings
+      WHERE user_id = ? AND comic_id = ? AND chapter_id = 0
+    `).get(currentUser.id, comic.id);
+    comic.my_rating = mine ? mine.stars : null;
+  } else {
+    comic.my_rating = null;
+  }
+
   res.json(comic);
+});
+
+// Ratings + comments for a story (and optional chapter via ?chapter_id=)
+app.get('/api/comics/:id/feedback', (req, res) => {
+  const comicId = parseInt(req.params.id, 10);
+  const comic = db.prepare('SELECT id, status, user_id FROM comics WHERE id = ?').get(comicId);
+  if (!comic) return res.status(404).json({ error: 'Not found' });
+
+  const currentUser = getCurrentUser(req);
+  const isOwner = currentUser && sameUserId(currentUser.id, comic.user_id);
+  const isEditor = currentUser && (currentUser.role === 'editor' || currentUser.role === 'admin');
+  if (comic.status !== 'published' && !isOwner && !isEditor) {
+    return res.status(403).json({ error: 'Not available' });
+  }
+
+  let chapterId = parseInt(req.query.chapter_id, 10);
+  if (Number.isNaN(chapterId) || chapterId < 0) chapterId = 0;
+
+  const storyAgg = db.prepare(`
+    SELECT AVG(stars * 1.0) as avg_rating, COUNT(*) as rating_count
+    FROM story_ratings WHERE comic_id = ? AND chapter_id = 0
+  `).get(comicId);
+
+  const chapterAgg = chapterId > 0
+    ? db.prepare(`
+        SELECT AVG(stars * 1.0) as avg_rating, COUNT(*) as rating_count
+        FROM story_ratings WHERE comic_id = ? AND chapter_id = ?
+      `).get(comicId, chapterId)
+    : null;
+
+  let my_rating = null;
+  if (currentUser) {
+    const mine = db.prepare(`
+      SELECT stars FROM story_ratings
+      WHERE user_id = ? AND comic_id = ? AND chapter_id = ?
+    `).get(currentUser.id, comicId, chapterId);
+    my_rating = mine ? mine.stars : null;
+  }
+
+  // chapter_id=0 → all comments for story; otherwise filter to that chapter
+  const commentRows = chapterId === 0
+    ? db.prepare(`
+        SELECT sc.id, sc.body, sc.chapter_id, sc.created_at, sc.user_id,
+               COALESCE(NULLIF(u.username, ''), 'Reader') as username
+        FROM story_comments sc
+        JOIN users u ON u.id = sc.user_id
+        WHERE sc.comic_id = ?
+        ORDER BY sc.created_at DESC
+        LIMIT 100
+      `).all(comicId)
+    : db.prepare(`
+        SELECT sc.id, sc.body, sc.chapter_id, sc.created_at, sc.user_id,
+               COALESCE(NULLIF(u.username, ''), 'Reader') as username
+        FROM story_comments sc
+        JOIN users u ON u.id = sc.user_id
+        WHERE sc.comic_id = ? AND sc.chapter_id = ?
+        ORDER BY sc.created_at DESC
+        LIMIT 100
+      `).all(comicId, chapterId);
+
+  res.json({
+    comic_id: comicId,
+    chapter_id: chapterId,
+    story: {
+      avg_rating: storyAgg && storyAgg.avg_rating != null
+        ? Math.round(Number(storyAgg.avg_rating) * 10) / 10
+        : null,
+      rating_count: Number(storyAgg && storyAgg.rating_count) || 0,
+    },
+    chapter: chapterAgg
+      ? {
+          avg_rating: chapterAgg.avg_rating != null
+            ? Math.round(Number(chapterAgg.avg_rating) * 10) / 10
+            : null,
+          rating_count: Number(chapterAgg.rating_count) || 0,
+        }
+      : null,
+    my_rating,
+    comments: commentRows,
+  });
+});
+
+app.post('/api/comics/:id/rate', requireAuth, requireVerified, (req, res) => {
+  const comicId = parseInt(req.params.id, 10);
+  const comic = db.prepare('SELECT id, status FROM comics WHERE id = ?').get(comicId);
+  if (!comic) return res.status(404).json({ error: 'Not found' });
+  if (comic.status !== 'published') {
+    return res.status(400).json({ error: 'Only published stories can be rated' });
+  }
+
+  const stars = parseInt(req.body.stars, 10);
+  if (!stars || stars < 1 || stars > 5) {
+    return res.status(400).json({ error: 'Rating must be 1–5 stars' });
+  }
+
+  let chapterId = parseInt(req.body.chapter_id, 10);
+  if (Number.isNaN(chapterId) || chapterId < 0) chapterId = 0;
+  if (chapterId > 0) {
+    const ch = db.prepare('SELECT id FROM chapters WHERE id = ? AND comic_id = ?').get(chapterId, comicId);
+    if (!ch) return res.status(400).json({ error: 'Invalid chapter' });
+  }
+
+  db.prepare(`
+    INSERT INTO story_ratings (user_id, comic_id, chapter_id, stars, updated_at)
+    VALUES (?, ?, ?, ?, datetime('now'))
+    ON CONFLICT(user_id, comic_id, chapter_id) DO UPDATE SET
+      stars = excluded.stars,
+      updated_at = datetime('now')
+  `).run(req.session.userId, comicId, chapterId, stars);
+
+  const agg = db.prepare(`
+    SELECT AVG(stars * 1.0) as avg_rating, COUNT(*) as rating_count
+    FROM story_ratings WHERE comic_id = ? AND chapter_id = ?
+  `).get(comicId, chapterId);
+
+  res.json({
+    success: true,
+    my_rating: stars,
+    chapter_id: chapterId,
+    avg_rating: agg && agg.avg_rating != null ? Math.round(Number(agg.avg_rating) * 10) / 10 : stars,
+    rating_count: Number(agg && agg.rating_count) || 1,
+  });
+});
+
+app.post('/api/comics/:id/comments', requireAuth, requireVerified, (req, res) => {
+  const comicId = parseInt(req.params.id, 10);
+  const comic = db.prepare('SELECT id, status FROM comics WHERE id = ?').get(comicId);
+  if (!comic) return res.status(404).json({ error: 'Not found' });
+  if (comic.status !== 'published') {
+    return res.status(400).json({ error: 'Only published stories can be commented on' });
+  }
+
+  const body = String(req.body.body || '').trim();
+  if (body.length < 2) return res.status(400).json({ error: 'Comment is too short' });
+  if (body.length > 2000) return res.status(400).json({ error: 'Comment must be under 2000 characters' });
+
+  let chapterId = parseInt(req.body.chapter_id, 10);
+  if (Number.isNaN(chapterId) || chapterId < 0) chapterId = 0;
+  if (chapterId > 0) {
+    const ch = db.prepare('SELECT id FROM chapters WHERE id = ? AND comic_id = ?').get(chapterId, comicId);
+    if (!ch) return res.status(400).json({ error: 'Invalid chapter' });
+  }
+
+  const result = db.prepare(`
+    INSERT INTO story_comments (user_id, comic_id, chapter_id, body)
+    VALUES (?, ?, ?, ?)
+  `).run(req.session.userId, comicId, chapterId, body);
+
+  const user = getCurrentUser(req);
+  res.status(201).json({
+    id: result.lastInsertRowid,
+    body,
+    chapter_id: chapterId,
+    created_at: new Date().toISOString(),
+    user_id: req.session.userId,
+    username: (user && user.username) || 'Reader',
+  });
+});
+
+app.delete('/api/comments/:id', requireAuth, (req, res) => {
+  const row = db.prepare('SELECT * FROM story_comments WHERE id = ?').get(req.params.id);
+  if (!row) return res.status(404).json({ error: 'Not found' });
+  const user = getCurrentUser(req);
+  const isAdmin = user && (user.role === 'admin' || user.role === 'editor');
+  if (!sameUserId(row.user_id, req.session.userId) && !isAdmin) {
+    return res.status(403).json({ error: 'Not your comment' });
+  }
+  db.prepare('DELETE FROM story_comments WHERE id = ?').run(req.params.id);
+  res.json({ success: true });
 });
 
 // Check if current user has purchased this comic

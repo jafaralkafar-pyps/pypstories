@@ -204,7 +204,8 @@
             
             <select id="sort-filter" onchange="loadComics()" 
                     class="bg-slate-900 border border-slate-700 rounded-2xl px-3 sm:px-4 py-2.5 sm:py-3 text-sm outline-none">
-              <option value="popular">Most popular</option>
+              <option value="popular">Most views</option>
+              <option value="rating">Top rated</option>
               <option value="new">Newest</option>
               <option value="price">Price</option>
             </select>
@@ -379,7 +380,7 @@
         <button onclick="closeComicInfo()" class="text-slate-400 hover:text-white px-2">Close</button>
       </div>
 
-      <div class="p-4 sm:p-6">
+      <div class="p-4 sm:p-6 overflow-y-auto max-h-[min(70vh,640px)]">
         <div id="info-title" class="text-2xl font-semibold tracking-tight"></div>
         <div id="info-author" class="mt-1 text-sm"></div>
 
@@ -387,11 +388,38 @@
           <div id="info-genre" class="px-2.5 py-0.5 bg-slate-800 rounded-full text-slate-300"></div>
           <div id="info-pages" class="px-2.5 py-0.5 bg-slate-800 rounded-full text-slate-400"></div>
           <div id="info-price" class="px-2.5 py-0.5 bg-emerald-900/70 text-emerald-400 rounded-full font-medium"></div>
+          <div id="info-views" class="px-2.5 py-0.5 bg-slate-800 rounded-full text-slate-300"></div>
+          <div id="info-rating-badge" class="px-2.5 py-0.5 bg-slate-800 rounded-full text-amber-300"></div>
         </div>
 
         <div class="mt-5">
           <div class="uppercase text-[10px] tracking-[1px] text-slate-500 mb-1.5">Description</div>
-          <div id="info-description" class="text-[15px] text-slate-200 leading-relaxed whitespace-pre-line max-h-[210px] overflow-auto pr-1"></div>
+          <div id="info-description" class="text-[15px] text-slate-200 leading-relaxed whitespace-pre-line max-h-[140px] overflow-auto pr-1"></div>
+        </div>
+
+        <!-- Rate this story / chapter -->
+        <div class="mt-5 border border-slate-800 rounded-2xl p-3 bg-slate-950/60">
+          <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
+            <div class="uppercase text-[10px] tracking-[1px] text-slate-500">Your rating</div>
+            <select id="info-feedback-target" class="bg-slate-900 border border-slate-700 rounded-xl px-2 py-1 text-xs max-w-[55%]">
+              <option value="0">Whole story</option>
+            </select>
+          </div>
+          <div id="info-star-buttons" class="flex gap-1.5 items-center"></div>
+          <div id="info-rating-hint" class="text-[11px] text-slate-500 mt-2">Log in to rate (1–5 stars).</div>
+        </div>
+
+        <!-- Comments -->
+        <div class="mt-5">
+          <div class="uppercase text-[10px] tracking-[1px] text-slate-500 mb-2">Comments</div>
+          <div id="info-comment-form" class="mb-3">
+            <textarea id="info-comment-body" rows="2" maxlength="2000"
+              class="w-full bg-slate-950 border border-slate-700 rounded-2xl px-3 py-2 text-sm"
+              placeholder="Share your thoughts (login required)…"></textarea>
+            <button type="button" id="info-comment-submit"
+              class="mt-2 w-full py-2 rounded-2xl bg-slate-800 hover:bg-slate-700 text-sm font-medium">Post comment</button>
+          </div>
+          <div id="info-comments-list" class="space-y-2 max-h-44 overflow-y-auto text-sm"></div>
         </div>
       </div>
 
