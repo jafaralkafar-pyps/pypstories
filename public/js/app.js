@@ -178,8 +178,13 @@
         successEl.classList.add('hidden');
       }
 
-      const resendEl = document.getElementById('login-resend');
-      if (resendEl) resendEl.classList.add('hidden');
+      const resendStatus = document.getElementById('login-resend-status');
+      if (resendStatus) {
+        resendStatus.textContent = '';
+        resendStatus.classList.add('hidden');
+        resendStatus.classList.remove('text-red-400');
+        resendStatus.classList.add('text-emerald-400');
+      }
     }
 
     function closeAuthModal() {
@@ -235,12 +240,8 @@
       if (data.error) {
         errorEl.textContent = data.error;
         errorEl.classList.remove('hidden');
-        
         if (data.requiresVerification) {
-          document.getElementById('login-resend').classList.remove('hidden');
-          if (window.location.hostname === 'localhost') {
-            errorEl.textContent += ' (Check server console for dev email link)';
-          }
+          errorEl.textContent += ' Use “Resend verification email” below.';
         }
         return;
       }
@@ -281,23 +282,26 @@
       const data = await res.json();
       
       if (data.error) {
-        errorEl.textContent = data.error;
+        // Account already exists (often unverified from an earlier attempt)
+        if (res.status === 409) {
+          errorEl.textContent = data.error + ' If you never got a verification email, switch to Log in and use Resend verification email.';
+        } else {
+          errorEl.textContent = data.error;
+        }
         errorEl.classList.remove('hidden');
         return;
       }
-      
-      closeAuthModal();
-      
-      // Show verification notice
-      let msg = `Account created successfully!\n\nPlease check your email (${email}) for a verification link.`;
-      if (window.location.hostname === 'localhost') {
-        msg += '\n\n(Dev mode: If no email arrives, check the terminal running the server for the verification link.)';
-      }
-      alert(msg);
-      
-      // Optionally auto-open login tab next time
-      showAuthModal();
+
+      // Stay in auth modal: switch to login with email filled + clear next steps
       switchAuthTab('login');
+      const loginEmail = document.getElementById('login-email');
+      if (loginEmail) loginEmail.value = email;
+      const statusEl = document.getElementById('login-resend-status');
+      if (statusEl) {
+        statusEl.textContent = `Account created. Check ${email} for a verification link, or click Resend verification email.`;
+        statusEl.classList.remove('hidden', 'text-red-400');
+        statusEl.classList.add('text-emerald-400');
+      }
     }
 
     async function resendVerification(email) {
@@ -308,20 +312,55 @@
       });
       const data = await res.json();
       if (!res.ok || data.error) {
-        alert('Failed to send verification email: ' + (data.error || 'Unknown error. Check server logs.'));
-        return;
+        return { ok: false, message: data.error || 'Failed to send verification email.' };
       }
-      let msg = data.message || 'Verification email sent if the account exists.';
-      if (window.location.hostname === 'localhost') {
-        msg += '\n(Dev mode: Check the server terminal/console for the link if using test email service.)';
-      }
-      alert(msg);
+      return { ok: true, message: data.message || 'Verification email sent if the account exists and is unverified.' };
     }
 
     async function resendFromLogin() {
       const email = document.getElementById('login-email').value.trim();
-      if (!email) return alert('Please enter your email first.');
-      await resendVerification(email);
+      const statusEl = document.getElementById('login-resend-status');
+      const errorEl = document.getElementById('login-error');
+      if (errorEl) errorEl.classList.add('hidden');
+
+      if (!email) {
+        if (statusEl) {
+          statusEl.textContent = 'Enter your email address above first.';
+          statusEl.classList.remove('hidden', 'text-emerald-400');
+          statusEl.classList.add('text-red-400');
+        } else {
+          alert('Please enter your email first.');
+        }
+        return;
+      }
+
+      const btn = document.getElementById('login-resend-btn');
+      if (btn) {
+        btn.disabled = true;
+        btn.textContent = 'Sending…';
+      }
+
+      try {
+        const result = await resendVerification(email);
+        if (statusEl) {
+          statusEl.textContent = result.message;
+          statusEl.classList.remove('hidden');
+          if (result.ok) {
+            statusEl.classList.remove('text-red-400');
+            statusEl.classList.add('text-emerald-400');
+          } else {
+            statusEl.classList.remove('text-emerald-400');
+            statusEl.classList.add('text-red-400');
+          }
+        } else {
+          alert(result.message);
+        }
+      } finally {
+        if (btn) {
+          btn.disabled = false;
+          btn.textContent = 'Resend verification email';
+        }
+      }
     }
 
     async function sendForgotPassword() {
@@ -3005,6 +3044,7 @@
     window.logout = logout;
     window.showForgotPassword = showForgotPassword;
     window.resendFromLogin = resendFromLogin;
+    window.resendVerification = resendVerification;
     window.showHome = showHome;
     window.showBrowse = showBrowse;
     window.showMyComics = showMyComics;

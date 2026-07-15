@@ -852,10 +852,12 @@ app.post('/api/resend-verification', authLimiter, async (req, res) => {
     await sendVerificationEmail(user.email, verificationToken);
   } catch (err) {
     console.error('Failed to send resend verification email:', err.message || err);
-    // Still return success so user isn't blocked, they can use the link from console if in dev
+    return res.status(502).json({
+      error: 'Could not send verification email. Please try again in a few minutes or contact support.',
+    });
   }
 
-  res.json({ success: true, message: 'Verification email has been resent.' });
+  res.json({ success: true, message: 'Verification email has been resent. Check your inbox and spam folder.' });
 });
 
 // Get current verification status
