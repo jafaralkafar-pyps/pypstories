@@ -1201,7 +1201,7 @@
       widget.innerHTML = `
         <div class="bg-slate-900 border border-slate-700 rounded-3xl p-6 max-w-lg w-full mx-4" onclick="event.stopImmediatePropagation()">
           <h3 class="text-xl font-semibold mb-2">Add Pages</h3>
-          <div class="text-xs text-slate-400 mb-4">Supports single or multiple images (bulk upload for stories). Max 25 images per batch recommended.</div>
+          <div class="text-xs text-slate-400 mb-4">Supports single or multiple images. Max 25MB per image, ~25 images per batch. If upload fails, try fewer/smaller files.</div>
           
           <!-- Drag & Drop Zone (multi) -->
           <div id="drop-zone" class="border-2 border-dashed border-blue-500 rounded-2xl p-8 text-center mb-3 cursor-pointer hover:bg-slate-800 transition">
@@ -1420,10 +1420,14 @@
               method: 'POST',
               body: singleForm
             });
-            const page = await res.json();
+            let page = {};
+            try { page = await res.json(); } catch (_) {}
             widget.remove();
-            if (page.error) alert(page.error);
-            else await loadEditor(editingComicId);
+            if (!res.ok || page.error) {
+              alert(page.error || `Upload failed (${res.status}). File may be too large — max 25MB per image.`);
+            } else {
+              await loadEditor(editingComicId);
+            }
             return;
           }
 
@@ -1432,19 +1436,19 @@
             method: 'POST',
             body: form
           });
-          const data = await res.json();
+          let data = {};
+          try { data = await res.json(); } catch (_) {}
           
           widget.remove();
           
-          if (data.error) {
-            alert(data.error);
+          if (!res.ok || data.error) {
+            alert(data.error || `Upload failed (${res.status}). Try fewer files, or keep each image under 25MB.`);
           } else {
             await loadEditor(editingComicId);
-            // Optional hint
             if (data.count > 1) console.log(`Added ${data.count} pages via bulk`);
           }
         } catch (e) {
-          alert('Bulk upload failed. Try fewer files or smaller images.');
+          alert('Upload failed. Try fewer files or smaller images (max 25MB each). Check your connection and try again.');
           widget.remove();
         }
       };

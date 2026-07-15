@@ -254,11 +254,16 @@ try {
 
 // Multer config - use memory storage so we can pass buffer to abstracted storage service
 // (local disk for PoC, easy to swap to R2/S3 later)
+// Per-file limit: comic panels can be large; keep under typical Nginx body size (100MB).
+const MAX_IMAGE_BYTES = 25 * 1024 * 1024; // 25MB per file
+const MAX_BULK_FILES = 25;
+const MAX_BULK_TOTAL_BYTES = 100 * 1024 * 1024; // 100MB per bulk request
+
 const imageUpload = multer({
   storage: multer.memoryStorage(),
-  limits: { 
-    fileSize: 10 * 1024 * 1024, // 10MB per file (web comic friendly)
-    files: 25 // max 25 files per bulk upload request
+  limits: {
+    fileSize: MAX_IMAGE_BYTES,
+    files: MAX_BULK_FILES
   },
   fileFilter: (req, file, cb) => {
     const allowed = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
@@ -266,6 +271,46 @@ const imageUpload = multer({
     else cb(new Error('Only JPEG, PNG, WebP, and GIF images allowed'));
   }
 });
+
+// Wrap multer so oversize files return a clear JSON message (not a blank 500)
+function uploadSingle(field) {
+  return (req, res, next) => {
+    imageUpload.single(field)(req, res, (err) => {
+      if (!err) return next();
+      if (err instanceof multer.MulterError && err.code === 'LIMIT_FILE_SIZE') {
+        return res.status(413).json({
+          error: `Image too large. Max ${MAX_IMAGE_BYTES / (1024 * 1024)}MB per file. Compress or resize, then try again.`
+        });
+      }
+      if (err instanceof multer.MulterError) {
+        return res.status(400).json({ error: err.message || 'Upload error' });
+      }
+      return res.status(400).json({ error: err.message || 'Upload error' });
+    });
+  };
+}
+
+function uploadArray(field, maxCount) {
+  return (req, res, next) => {
+    imageUpload.array(field, maxCount)(req, res, (err) => {
+      if (!err) return next();
+      if (err instanceof multer.MulterError && err.code === 'LIMIT_FILE_SIZE') {
+        return res.status(413).json({
+          error: `One or more images exceed ${MAX_IMAGE_BYTES / (1024 * 1024)}MB. Compress them or upload a smaller batch.`
+        });
+      }
+      if (err instanceof multer.MulterError && (err.code === 'LIMIT_FILE_COUNT' || err.code === 'LIMIT_UNEXPECTED_FILE')) {
+        return res.status(400).json({
+          error: `Too many files. Max ${MAX_BULK_FILES} images per upload.`
+        });
+      }
+      if (err instanceof multer.MulterError) {
+        return res.status(400).json({ error: err.message || 'Upload error' });
+      }
+      return res.status(400).json({ error: err.message || 'Upload error' });
+    });
+  };
+}
 
 // Helper to generate a unique filename (reused for key)
 function generateImageFilename(originalName) {
@@ -1613,7 +1658,7 @@ app.post('/api/comics/:id', requireAuth, requireVerified, (req, res) => {
 });
 
 // Upload / replace cover (thumbnail for browse cards)
-app.post('/api/comics/:id/cover', requireAuth, requireVerified, imageUpload.single('cover'), async (req, res) => {
+app.post('/api/comics/:id/cover', requireAuth, requireVerified, uploadSingle('cover'), async (req, res) => {
   const comicId = req.params.id;
   const comic = db.prepare('SELECT * FROM comics WHERE id = ?').get(comicId);
   if (!comic || comic.user_id !== req.session.userId) {
@@ -1799,7 +1844,7 @@ app.get('/api/comics/:id/pages', (req, res) => {
 });
 
 // Upload a new page for a comic
-app.post('/api/comics/:comicId/pages', requireAuth, requireVerified, imageUpload.single('image'), async (req, res) => {
+app.post('/api/comics/:comicId/pages', requireAuth, requireVerified, uploadSingle('image'), async (req, res) => {
   const comicId = req.params.comicId;
   const { title = '', text_content = '', is_start = '0' } = req.body;
 
@@ -1833,7 +1878,7 @@ app.post('/api/comics/:comicId/pages', requireAuth, requireVerified, imageUpload
 });
 
 // Bulk upload multiple pages (for mass image uploads when creating/editing stories)
-app.post('/api/comics/:comicId/pages/bulk', requireAuth, requireVerified, imageUpload.array('images', 25), async (req, res) => {
+app.post('/api/comics/:comicId/pages/bulk', requireAuth, requireVerified, uploadArray('images', MAX_BULK_FILES), async (req, res) => {
   const comicId = req.params.comicId;
   const files = req.files || [];
 
@@ -1841,10 +1886,12 @@ app.post('/api/comics/:comicId/pages/bulk', requireAuth, requireVerified, imageU
     return res.status(400).json({ error: 'No images provided' });
   }
 
-  // Total size safeguard for mass uploads (~100MB)
+  // Total size safeguard for mass uploads
   const totalSize = files.reduce((sum, f) => sum + (f.size || 0), 0);
-  if (totalSize > 100 * 1024 * 1024) {
-    return res.status(413).json({ error: 'Total upload exceeds 100MB limit for this batch. Please upload in smaller groups.' });
+  if (totalSize > MAX_BULK_TOTAL_BYTES) {
+    return res.status(413).json({
+      error: `Total upload exceeds ${MAX_BULK_TOTAL_BYTES / (1024 * 1024)}MB for this batch. Upload in smaller groups.`
+    });
   }
 
   // Verify ownership
@@ -1880,7 +1927,7 @@ app.post('/api/comics/:comicId/pages/bulk', requireAuth, requireVerified, imageU
 });
 
 // Update an existing page's title, caption/text, and optionally the image
-app.post('/api/pages/:pageId', requireAuth, requireVerified, imageUpload.single('image'), async (req, res) => {
+app.post('/api/pages/:pageId', requireAuth, requireVerified, uploadSingle('image'), async (req, res) => {
   const pageId = req.params.pageId;
   const { title = '', text_content = '' } = req.body;
 
@@ -1913,7 +1960,7 @@ app.post('/api/pages/:pageId', requireAuth, requireVerified, imageUpload.single(
 });
 
 // Add a choice to a page (now supports image for visual choice instead of just text)
-app.post('/api/pages/:pageId/choices', requireAuth, requireVerified, resolveComicForChoice, imageUpload.single('image'), async (req, res) => {
+app.post('/api/pages/:pageId/choices', requireAuth, requireVerified, resolveComicForChoice, uploadSingle('image'), async (req, res) => {
   const { choice_text = '', to_page_id } = req.body;
   const fromPageId = req.params.pageId;
 
