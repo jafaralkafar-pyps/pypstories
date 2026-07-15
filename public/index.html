@@ -235,7 +235,9 @@
         <!-- Filters -->
         <div class="flex flex-col md:flex-row gap-3 items-center mb-6">
           <div class="flex-1 w-full">
-            <input id="search-input" type="text" placeholder="Search by title, author, or description..." 
+            <input id="search-input" type="search" name="story_search" placeholder="Search by title, author, or description..."
+                   autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false"
+                   data-lpignore="true" data-1p-ignore="true" data-form-type="other" inputmode="search"
                    class="w-full bg-slate-900 border border-slate-700 focus:border-blue-600 rounded-2xl px-4 sm:px-5 py-2.5 sm:py-3 text-sm outline-none"
                    oninput="debounceSearch()">
           </div>
