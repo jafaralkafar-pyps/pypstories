@@ -1,0 +1,8 @@
+# https://pypstories.com/robots.txt
+User-agent: *
+Allow: /
+
+# Prefer indexing the public site; app APIs are not for search results
+Disallow: /api/
+
+Sitemap: https://pypstories.com/sitemap.xml

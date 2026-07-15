@@ -3,8 +3,54 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Pick Your Path Stories</title>
+  <title>Pick Your Path Stories | Choose Your Own Adventure Web Comics &amp; Interactive Books</title>
+  <meta name="description" content="Read and create choose-your-own-adventure stories, interactive comics, and webtoon-style branching books online. Free samples, original stories, and a creator platform at PYPStories.com.">
+  <meta name="keywords" content="choose your own adventure, interactive stories, web comics, webtoons, branching stories, CYOA, interactive books, digital comics, pick your path, online comics">
+  <meta name="author" content="Pick Your Path Stories">
+  <meta name="robots" content="index, follow">
+  <link rel="canonical" href="https://pypstories.com/">
+
+  <!-- Open Graph / social -->
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Pick Your Path Stories">
+  <meta property="og:url" content="https://pypstories.com/">
+  <meta property="og:title" content="Pick Your Path Stories | Choose Your Own Adventure Comics &amp; Interactive Books">
+  <meta property="og:description" content="Branching stories you control. Discover choose-your-own-adventure comics, interactive books, and webtoon-style paths — or create your own.">
+  <meta property="og:locale" content="en_US">
+
+  <!-- Twitter -->
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Pick Your Path Stories | Choose Your Own Adventure Comics">
+  <meta name="twitter:description" content="Interactive choose-your-own-adventure stories, web comics, and branching books online.">
+
   <link rel="stylesheet" href="/css/tailwind.css">
+
+  <!-- Structured data for search engines -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "WebSite",
+    "name": "Pick Your Path Stories",
+    "alternateName": ["PYPStories", "PYP Stories"],
+    "url": "https://pypstories.com/",
+    "description": "Choose-your-own-adventure stories, interactive comics, and branching webtoon-style books you can read and create online.",
+    "potentialAction": {
+      "@type": "SearchAction",
+      "target": "https://pypstories.com/?q={search_term_string}",
+      "query-input": "required name=search_term_string"
+    }
+  }
+  </script>
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "Organization",
+    "name": "Pick Your Path Stories",
+    "url": "https://pypstories.com/",
+    "logo": "https://pypstories.com/",
+    "sameAs": []
+  }
+  </script>
 
   <!-- Google AdSense (site ownership verification + ads). Keep in <head> on the main page. -->
   <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9811413201474824"
@@ -169,14 +215,22 @@
     <!-- CATALOG (Home with hero, or Browse without hero) -->
     <div id="view-catalog">
       <div class="max-w-6xl mx-auto px-4 sm:px-6 py-8 sm:py-10">
-        <!-- Hero — home only -->
+        <!-- Hero — home only (primary SEO landing copy lives here) -->
         <div id="home-hero" class="mb-10">
           <h1 class="text-4xl sm:text-5xl md:text-6xl lg:text-7xl font-semibold tracking-tighter mb-3">Pick your path.<br>Every choice writes the story.</h1>
-          <p class="text-base sm:text-lg md:text-xl text-slate-400 max-w-xl">Discover and create your own branching stories. Upload pages, link choices, and share your dreams at PYPStories.com.</p>
+          <p class="text-base sm:text-lg md:text-xl text-slate-400 max-w-2xl">
+            Read <strong class="text-slate-300 font-medium">choose-your-own-adventure</strong> stories, interactive
+            <strong class="text-slate-300 font-medium">comics</strong>, and branching
+            <strong class="text-slate-300 font-medium">webtoon-style</strong> books online — or create your own and share them with readers.
+          </p>
+          <p class="mt-3 text-sm sm:text-base text-slate-500 max-w-2xl">
+            PYPStories is a home for interactive fiction and digital comics where every decision opens a new path.
+            Browse free samples, original CYOA tales, and illustrated adventures made for the web.
+          </p>
         </div>
 
         <!-- Browse page title — browse only -->
-        <h2 id="browse-heading" class="hidden text-2xl sm:text-3xl font-semibold tracking-tighter mb-6">Browse</h2>
+        <h2 id="browse-heading" class="hidden text-2xl sm:text-3xl font-semibold tracking-tighter mb-6">Browse interactive stories &amp; comics</h2>
 
         <!-- Filters -->
         <div class="flex flex-col md:flex-row gap-3 items-center mb-6">
@@ -210,6 +264,30 @@
         <div id="browse-empty" class="hidden text-center py-12 text-slate-400">
           No stories found. Be the first to create one!
         </div>
+
+        <!-- Static SEO section (always in HTML so crawlers see topic keywords without JS) -->
+        <section id="seo-about" class="mt-14 sm:mt-16 pt-10 border-t border-slate-800 max-w-3xl" aria-labelledby="seo-about-heading">
+          <h2 id="seo-about-heading" class="text-xl sm:text-2xl font-semibold tracking-tight text-slate-100 mb-3">
+            Choose-your-own-adventure stories, web comics &amp; interactive books
+          </h2>
+          <div class="space-y-3 text-sm sm:text-base text-slate-400 leading-relaxed">
+            <p>
+              Looking for <strong class="text-slate-300 font-medium">choose your own adventure</strong> online?
+              Pick Your Path Stories (PYPStories) lets you read branching narratives the way classic CYOA books worked —
+              pick a choice, jump to a new page, and shape the ending — with art and layout built for the web.
+            </p>
+            <p>
+              Creators can publish interactive <strong class="text-slate-300 font-medium">comics</strong>,
+              illustrated paths inspired by <strong class="text-slate-300 font-medium">webtoons</strong>,
+              and digital <strong class="text-slate-300 font-medium">books</strong> where readers decide what happens next.
+              Upload pages, connect choices, set a free sample or a price, and share a link with anyone.
+            </p>
+            <p>
+              Whether you love interactive fiction, web comics, or story games in book form, start on the home page catalog,
+              open a story, and pick your path.
+            </p>
+          </div>
+        </section>
       </div>
     </div>
 
@@ -627,6 +705,15 @@
     </div>
   </div>
 
+  <!-- Site footer (helps visitors + search engines) -->
+  <footer class="border-t border-slate-800 mt-8 py-8 text-center text-xs sm:text-sm text-slate-500">
+    <div class="max-w-6xl mx-auto px-4 sm:px-6 space-y-2">
+      <p class="text-slate-400 font-medium">Pick Your Path Stories · PYPStories.com</p>
+      <p>Choose-your-own-adventure · Interactive comics · Webtoon-style paths · Digital books</p>
+      <p class="text-slate-600">© <span id="footer-year"></span> PYPStories. Read a path or create your own.</p>
+    </div>
+  </footer>
+  <script>document.getElementById('footer-year').textContent = new Date().getFullYear();</script>
     <script src="/js/app.js"></script>
 </body>
 </html>

@@ -166,12 +166,15 @@
       catalogMode = mode;
       const hero = document.getElementById('home-hero');
       const browseHeading = document.getElementById('browse-heading');
+      const seoAbout = document.getElementById('seo-about');
       if (mode === 'home') {
         hero.classList.remove('hidden');
         browseHeading.classList.add('hidden');
+        if (seoAbout) seoAbout.classList.remove('hidden');
       } else {
         hero.classList.add('hidden');
         browseHeading.classList.remove('hidden');
+        if (seoAbout) seoAbout.classList.add('hidden');
       }
       loadComics();
     }
