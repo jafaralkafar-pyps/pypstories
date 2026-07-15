@@ -135,6 +135,7 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS pages (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     comic_id INTEGER NOT NULL,
+    title TEXT DEFAULT '',
     image_path TEXT,
     text_content TEXT DEFAULT '',
     is_start INTEGER DEFAULT 0,
@@ -146,6 +147,7 @@ db.exec(`
     from_page_id INTEGER NOT NULL,
     choice_text TEXT NOT NULL,
     to_page_id INTEGER NOT NULL,
+    choice_image TEXT,
     FOREIGN KEY (from_page_id) REFERENCES pages(id) ON DELETE CASCADE,
     FOREIGN KEY (to_page_id) REFERENCES pages(id) ON DELETE CASCADE
   );
@@ -230,6 +232,23 @@ try {
 } catch (e) {}
 try {
   db.exec(`ALTER TABLE comics ADD COLUMN cover_image TEXT`);
+} catch (e) {}
+
+// Pages / choices columns added after first production DBs were created
+try {
+  db.exec(`ALTER TABLE pages ADD COLUMN title TEXT DEFAULT ''`);
+} catch (e) {}
+try {
+  db.exec(`ALTER TABLE pages ADD COLUMN text_content TEXT DEFAULT ''`);
+} catch (e) {}
+try {
+  db.exec(`ALTER TABLE pages ADD COLUMN is_start INTEGER DEFAULT 0`);
+} catch (e) {}
+try {
+  db.exec(`ALTER TABLE pages ADD COLUMN image_path TEXT`);
+} catch (e) {}
+try {
+  db.exec(`ALTER TABLE choices ADD COLUMN choice_image TEXT`);
 } catch (e) {}
 
 // Credits wallet, chapters, creator earnings
