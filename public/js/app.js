@@ -26,8 +26,9 @@
             slot: data.adsense.slot || '',
           };
         }
+        window.__tutorialVideoUrl = (data && data.tutorialVideoUrl) || '';
       } catch (e) {
-        console.warn('[Ads] public-config failed', e);
+        console.warn('[config] public-config failed', e);
       }
     }
 
@@ -1007,7 +1008,7 @@
       hideMainViews();
       document.getElementById('reader-modal').classList.add('hidden');
 
-      document.getElementById('create-modal-title').textContent = 'Create New Comic';
+      document.getElementById('create-modal-title').textContent = 'Create New Story';
       document.getElementById('create-form').classList.remove('hidden');
       document.getElementById('editor-section').classList.add('hidden');
       
@@ -1019,8 +1020,66 @@
       // Clear page add fields if any
       const titleInput = document.getElementById('page-title');
       if (titleInput) titleInput.value = '';
+
+      renderCreatorTutorial();
       
       document.getElementById('create-modal').classList.remove('hidden');
+    }
+
+    function youtubeEmbedUrl(raw) {
+      if (!raw) return '';
+      const s = String(raw).trim();
+      if (!s) return '';
+      // Already an embed URL
+      if (/youtube\.com\/embed\//i.test(s)) return s.split('&')[0];
+      // youtu.be/ID
+      let m = s.match(/youtu\.be\/([a-zA-Z0-9_-]{6,})/);
+      if (m) return `https://www.youtube.com/embed/${m[1]}`;
+      // youtube.com/watch?v=ID
+      m = s.match(/[?&]v=([a-zA-Z0-9_-]{6,})/);
+      if (m) return `https://www.youtube.com/embed/${m[1]}`;
+      // youtube.com/shorts/ID
+      m = s.match(/youtube\.com\/shorts\/([a-zA-Z0-9_-]{6,})/);
+      if (m) return `https://www.youtube.com/embed/${m[1]}`;
+      // Bare video id
+      if (/^[a-zA-Z0-9_-]{11}$/.test(s)) return `https://www.youtube.com/embed/${s}`;
+      return '';
+    }
+
+    function renderCreatorTutorial() {
+      const mount = document.getElementById('creator-tutorial');
+      if (!mount) return;
+
+      const embed = youtubeEmbedUrl(window.__tutorialVideoUrl || '');
+
+      const videoBlock = embed
+        ? `<div class="relative w-full rounded-2xl overflow-hidden border border-slate-700 bg-black" style="padding-top:56.25%;">
+             <iframe class="absolute inset-0 w-full h-full"
+               src="${embed}?rel=0"
+               title="How to create a story on Pick Your Path Stories"
+               allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+               allowfullscreen loading="lazy"></iframe>
+           </div>`
+        : `<div class="rounded-2xl border border-dashed border-slate-600 bg-slate-950/80 px-4 py-6 text-center text-sm text-slate-400">
+             <div class="text-slate-300 font-medium mb-1">Tutorial video coming soon</div>
+             <p class="text-xs text-slate-500 max-w-md mx-auto">A short walkthrough will appear here once it is uploaded. Until then, follow the simple steps below.</p>
+           </div>`;
+
+      mount.innerHTML = `
+        <div class="mb-6 rounded-3xl border border-slate-700 bg-slate-950/60 p-4 sm:p-5">
+          <div class="text-sm font-semibold text-slate-200 mb-1">New here? How to build a story</div>
+          <p class="text-xs text-slate-500 mb-3">Create your story, upload page images, then link choices in Build Structure.</p>
+          ${videoBlock}
+          <ol class="mt-4 space-y-2 text-xs sm:text-sm text-slate-400 list-decimal list-inside">
+            <li><span class="text-slate-300">Name your story</span> — title, short description, genre, and price (0 = free).</li>
+            <li><span class="text-slate-300">Click Create Story</span> — opens the editor for this story.</li>
+            <li><span class="text-slate-300">Add Cover</span> (optional) — image shown on the browse page.</li>
+            <li><span class="text-slate-300">+ Add Page(s)</span> — upload your panel images (filenames become page names).</li>
+            <li><span class="text-slate-300">Build Structure</span> — set the start page, drag pages into choice slots, type choice labels, Save.</li>
+            <li><span class="text-slate-300">Preview</span> — try reading it, then Submit for Review when ready.</li>
+          </ol>
+        </div>
+      `;
     }
 
     async function createComic() {
@@ -1029,7 +1088,7 @@
       const genre = document.getElementById('comic-genre').value;
       const price = parseFloat(document.getElementById('comic-price').value) || 0;
 
-      if (!title) return alert('Please give your comic a title');
+      if (!title) return alert('Please give your story a title');
       if (price > 0 && price < 5.99) return alert('Full story / bundle minimum is $5.99 (or $0 free). Use chapters for smaller prices.');
 
       try {
@@ -1041,14 +1100,14 @@
         const comic = await res.json();
 
         if (!res.ok || comic.error) {
-          return alert(comic.error || 'Failed to create comic. Is the server running?');
+          return alert(comic.error || 'Failed to create story. Please try again.');
         }
 
         // Switch to editor
         editingComicId = comic.id;
         document.getElementById('create-form').classList.add('hidden');
         document.getElementById('editor-section').classList.remove('hidden');
-        document.getElementById('create-modal-title').textContent = 'Edit Comic';
+        document.getElementById('create-modal-title').textContent = 'Edit Story';
 
         await loadEditor(comic.id);
       } catch (err) {
@@ -1068,7 +1127,7 @@
       hideMainViews();
       document.getElementById('reader-modal').classList.add('hidden');
 
-      document.getElementById('create-modal-title').textContent = 'Edit Comic';
+      document.getElementById('create-modal-title').textContent = 'Edit Story';
       document.getElementById('create-form').classList.add('hidden');
       document.getElementById('editor-section').classList.remove('hidden');
       document.getElementById('create-modal').classList.remove('hidden');

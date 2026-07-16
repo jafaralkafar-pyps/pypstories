@@ -76,6 +76,8 @@ app.use(helmet({
             "https://tpc.googlesyndication.com",
             "https://www.google.com",
             "https://pagead2.googlesyndication.com",
+            "https://www.youtube.com",
+            "https://www.youtube-nocookie.com",
           ],
           "connect-src": [
             "'self'",
@@ -1500,6 +1502,8 @@ app.get('/api/public-config', (req, res) => {
       client,
       slot,
     },
+    // YouTube watch/share/embed URL or bare video id — shown on Create New Story
+    tutorialVideoUrl: (process.env.TUTORIAL_VIDEO_URL || '').trim(),
   });
 });
 

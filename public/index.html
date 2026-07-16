@@ -555,7 +555,10 @@
     <div onclick="event.stopImmediatePropagation()" class="bg-slate-900 border border-slate-700 w-full h-full p-4 sm:p-6 flex flex-col min-h-0" style="height:100%;">
       <h3 id="create-modal-title" class="text-2xl font-semibold tracking-tight mb-5">Create New Story</h3>
       
-      <div id="create-form">
+      <div id="create-form" class="flex-1 overflow-y-auto min-h-0 pr-0.5">
+        <!-- Tutorial video + steps for new creators -->
+        <div id="creator-tutorial"></div>
+
         <div class="space-y-4">
           <div>
             <label class="text-xs text-slate-400">Story Title</label>
