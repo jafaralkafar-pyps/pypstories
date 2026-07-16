@@ -1313,7 +1313,7 @@
           <div>${thumb}</div>
           <div class="flex-1 min-w-0 overflow-hidden">
             <div class="flex items-center gap-2">
-              <span class="font-medium">${page.title || 'Untitled Page'}</span>
+              <span class="font-medium truncate" title="${escapeHtml(pageDisplayName(page))}">${escapeHtml(pageDisplayName(page))}</span>
               ${page.is_start ? '<span class="text-[10px] px-1.5 py-px bg-emerald-900 text-emerald-400 rounded">START</span>' : ''}
             </div>
             <div class="text-xs text-slate-400 line-clamp-2 mt-0.5">${page.text_content || '(no text)'}</div>
@@ -1496,11 +1496,9 @@
           valid.splice(25 - selectedFiles.length);
         }
         selectedFiles = selectedFiles.concat(valid);
-        // If first selection, auto suggest prefix from common parts or leave
-        if (selectedFiles.length === 1 && !prefixInput.value) {
-          const base = selectedFiles[0].name.replace(/\.[^/.]+$/, "").replace(/[-_]/g, ' ');
-          prefixInput.value = base;
-        }
+        // Do not auto-fill "title prefix" with the filename — that becomes a bulk
+        // prefix and messes up multi-file names. Filenames are used as page titles
+        // when "Use filenames as titles" is checked (default).
         updateSelectedUI();
       }
 
@@ -1562,11 +1560,17 @@
         try {
           // Single file: rich endpoint (title, caption, start page)
           if (selectedFiles.length === 1) {
-            const title = widget.querySelector('#page-title-prefix').value.trim() ||
-                          (useFilenames ? selectedFiles[0].name.replace(/\.[^/.]+$/, '') : `Page ${Date.now()}`);
+            const fileName = fileBaseName(selectedFiles[0].name);
+            const prefixVal = (prefixInput.value || '').trim();
+            // Prefer: optional prefix+filename, else filename, else typed prefix alone
+            let title;
+            if (useFilenames && prefixVal) title = `${prefixVal} ${fileName}`.trim();
+            else if (useFilenames) title = fileName;
+            else if (prefixVal) title = prefixVal;
+            else title = fileName;
             const singleForm = new FormData();
             singleForm.append('image', selectedFiles[0]);
-            singleForm.append('title', title || selectedFiles[0].name.replace(/\.[^/.]+$/, ''));
+            singleForm.append('title', title);
             singleForm.append('text_content', (textArea && textArea.value || '').trim());
             singleForm.append('is_start', (makeStart && makeStart.checked) ? '1' : '0');
 
@@ -1649,8 +1653,8 @@
       // Create widget for image-based choice (no text box)
       const widget = document.createElement('div');
       widget.className = 'fixed inset-0 bg-black/70 flex items-center justify-center z-[9999]';
-      let optionsHtml = otherPages.map(p => 
-        `<option value="${p.id}">${p.text_content ? p.text_content.substring(0,50) : 'Page ' + p.id}</option>`
+      let optionsHtml = otherPages.map(p =>
+        `<option value="${p.id}">${escapeHtml(pageDisplayName(p))}</option>`
       ).join('');
 
       widget.innerHTML = `
@@ -1934,7 +1938,7 @@
             <label class="block text-sm font-medium mb-1">Initial / Starting Page</label>
             <div class="flex flex-col sm:flex-row gap-2">
               <select id="initial-page" class="bg-slate-900 border border-slate-700 rounded-2xl px-3 py-2 flex-1 text-sm">
-                ${currentPages.map((p, i) => `<option value="${p.id}" ${p.is_start ? 'selected' : ''}>${p.title || 'Untitled'} (Page ${i+1})</option>`).join('')}
+                ${currentPages.map((p, i) => `<option value="${p.id}" ${p.is_start ? 'selected' : ''}>${escapeHtml(pageDisplayName(p, i))}</option>`).join('')}
               </select>
               <button id="set-initial" class="px-4 py-2 bg-blue-600 hover:bg-blue-500 rounded-2xl text-sm">Set as Start</button>
             </div>
@@ -2190,7 +2194,7 @@
 
       function populateFocusSelect() {
         focusSelect.innerHTML = currentPages.map((p, i) =>
-          `<option value="${p.id}">${p.title || 'Untitled'} (Page ${i + 1})</option>`
+          `<option value="${p.id}">${escapeHtml(pageDisplayName(p, i))}</option>`
         ).join('');
         focusSelect.value = focusedPageId;
       }
@@ -2198,11 +2202,12 @@
       function updateFocusPreview() {
         const p = currentPages.find(pp => Number(pp.id) === Number(focusedPageId));
         if (!p) return;
+        const name = pageDisplayName(p);
         focusPreview.innerHTML = `
           <img src="${p.image_path || ''}" class="w-8 h-8 object-cover rounded border border-slate-600 flex-shrink-0" onerror="this.style.display='none'">
           <div class="min-w-0">
-            <div class="font-medium text-xs">Page ${currentPages.indexOf(p) + 1}</div>
-            <div class="text-slate-400 text-[10px] truncate">${(p.text_content || '').substring(0, 40)}</div>
+            <div class="font-medium text-xs truncate" title="${escapeHtml(name)}">${escapeHtml(name)}</div>
+            <div class="text-slate-400 text-[10px] truncate">${escapeHtml((p.text_content || '').substring(0, 40))}</div>
           </div>
         `;
       }
@@ -2229,13 +2234,14 @@
 
             const head = document.createElement('div');
             head.className = 'flex items-center gap-2 mb-2';
+            const destName = linkedPage ? pageDisplayName(linkedPage) : '?';
             head.innerHTML = `
               ${linkedPage && linkedPage.image_path
                 ? `<img src="${linkedPage.image_path}" class="w-6 h-6 object-cover rounded border border-slate-600 flex-shrink-0">`
                 : '<div class="w-6 h-6 bg-slate-700 rounded flex-shrink-0"></div>'}
               <div class="flex-1 text-[10px] min-w-0">
-                <div>Choice ${i + 1} → Page ${linkedPage ? currentPages.indexOf(linkedPage) + 1 : '?'}</div>
-                <div class="text-emerald-400 truncate">${linkedPage ? (linkedPage.text_content || linkedPage.title || 'Untitled') : ''}</div>
+                <div>Choice ${i + 1} → <span class="text-slate-200" title="${escapeHtml(destName)}">${escapeHtml(destName)}</span></div>
+                <div class="text-emerald-400 truncate">${linkedPage ? escapeHtml((linkedPage.text_content || '').substring(0, 40)) : ''}</div>
               </div>
             `;
             const clearBtn = document.createElement('button');
@@ -2322,15 +2328,17 @@
 
       function populatePalette() {
         palette.innerHTML = '';
-        currentPages.forEach(p => {
+        currentPages.forEach((p, idx) => {
           if (Number(p.id) === Number(focusedPageId)) return;
           const card = document.createElement('div');
           card.className = 'bg-slate-800 border border-slate-700 rounded-xl p-1 text-xs cursor-grab flex gap-1 items-center';
           card.draggable = true;
           card.dataset.pageId = p.id;
+          const name = pageDisplayName(p, idx);
+          card.title = name;
           card.innerHTML = `
             ${p.image_path ? `<img src="${p.image_path}" class="w-6 h-6 object-cover rounded flex-shrink-0">` : '<div class="w-6 h-6 bg-slate-700 rounded flex-shrink-0"></div>'}
-            <div class="truncate flex-1 text-[10px]">${(p.text_content || 'Page ' + (currentPages.indexOf(p) + 1)).substring(0, 18)}</div>
+            <div class="truncate flex-1 text-[10px]">${escapeHtml(name)}</div>
           `;
           card.ondragstart = (e) => {
             e.dataTransfer.setData('text/plain', p.id);
@@ -2403,7 +2411,7 @@
         if (r.ok) {
           await refreshPagesFromServer();
           initialSelect.innerHTML = currentPages.map((p, i) =>
-            `<option value="${p.id}" ${Number(p.id) === Number(startId) ? 'selected' : ''}>${p.title || 'Untitled'} (Page ${i + 1})</option>`
+            `<option value="${p.id}" ${Number(p.id) === Number(startId) ? 'selected' : ''}>${escapeHtml(pageDisplayName(p, i))}</option>`
           ).join('');
           setStatus('Start page set', 'ok');
         }
@@ -2491,6 +2499,24 @@
         .replace(/</g, '&lt;')
         .replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;');
+    }
+
+    /** Prefer upload/file title over generic "Page N" labels in the editor & structure builder */
+    function pageDisplayName(page, indexHint) {
+      if (!page) return 'Untitled';
+      const title = String(page.title || '').trim();
+      if (title) return title;
+      const text = String(page.text_content || '').trim();
+      if (text) return text.length > 48 ? text.slice(0, 48) + '…' : text;
+      let idx = indexHint;
+      if (idx == null || idx < 0) {
+        idx = currentPages.findIndex(p => Number(p.id) === Number(page.id));
+      }
+      return idx >= 0 ? `Page ${idx + 1}` : 'Untitled page';
+    }
+
+    function fileBaseName(filename) {
+      return String(filename || 'Page').replace(/\.[^/.]+$/, '').trim() || 'Page';
     }
 
     function formatStars(avg, count) {

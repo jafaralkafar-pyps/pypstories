@@ -2219,10 +2219,11 @@ app.post('/api/comics/:comicId/pages/bulk', requireAuth, requireVerified, upload
       await storageService.upload(file.buffer, key);
       const imagePath = storageService.getPublicUrl(key);
 
-      // Derive a nice title from original filename or use prefix + index
-      let baseTitle = file.originalname ? path.parse(file.originalname).name : `Page`;
-      baseTitle = baseTitle.replace(/[-_]+/g, ' ').replace(/\s+/g, ' ').trim();
-      const title = title_prefix ? `${title_prefix} ${baseTitle}` : (baseTitle || `Page`);
+      // Keep original file base name as the page title (structure builder shows this)
+      let baseTitle = file.originalname ? path.parse(file.originalname).name : 'Page';
+      baseTitle = String(baseTitle || 'Page').trim() || 'Page';
+      const prefix = String(title_prefix || '').trim();
+      const title = prefix ? `${prefix} ${baseTitle}` : baseTitle;
 
       const result = db.prepare(`
         INSERT INTO pages (comic_id, title, image_path, text_content, is_start)
