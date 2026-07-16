@@ -2369,10 +2369,6 @@ app.post('/api/pages/:pageId/set-choices', requireAuth, requireVerified, (req, r
   // optional parallel labels: ["label0", "label1", "label2"]
   const { choices, labels } = req.body || {};
 
-  console.log('[set-choices] page', fromPageId, 'body keys', Object.keys(req.body || {}));
-  console.log('[set-choices] raw choices', JSON.stringify(choices, null, 2));
-  console.log('[set-choices] raw labels', JSON.stringify(labels));
-
   if (!choices || !Array.isArray(choices) || choices.length > 3) {
     return res.status(400).json({ error: 'Up to 3 choices required' });
   }
@@ -2421,7 +2417,6 @@ app.post('/api/pages/:pageId/set-choices', requireAuth, requireVerified, (req, r
     slotIndex++;
   }
 
-  console.log('[set-choices] saved', JSON.stringify(saved));
   res.json({ success: true, choices: saved });
 });
 
@@ -2455,7 +2450,6 @@ app.post('/api/pages/:pageId/choice-labels', requireAuth, requireVerified, (req,
     updated.push({ id: row.id, text });
   });
 
-  console.log('[choice-labels] page', fromPageId, updated);
   res.json({ success: true, choices: updated });
 });
 
