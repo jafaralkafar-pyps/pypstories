@@ -546,6 +546,41 @@
       showHome();
     }
 
+    /** Start Stripe Express onboarding for creator payouts */
+    async function startStripeConnect(buttonEl) {
+      if (!currentUser) {
+        showAuthModal('login');
+        return;
+      }
+      const prevText = buttonEl ? buttonEl.textContent : '';
+      if (buttonEl) {
+        buttonEl.disabled = true;
+        buttonEl.textContent = 'Connecting…';
+      }
+      try {
+        const r = await fetch('/api/stripe/connect', {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json' },
+        });
+        let d = {};
+        try { d = await r.json(); } catch (_) {}
+        if (!r.ok || !d.url) {
+          alert(d.error || `Could not start Stripe Connect (HTTP ${r.status}). Check that Stripe Connect is enabled in your Stripe Dashboard.`);
+          return;
+        }
+        window.location.href = d.url;
+      } catch (e) {
+        console.error(e);
+        alert('Network error starting Stripe Connect. Try again.');
+      } finally {
+        if (buttonEl) {
+          buttonEl.disabled = false;
+          buttonEl.textContent = prevText || 'Connect Stripe';
+        }
+      }
+    }
+
     async function showAccount() {
       if (!currentUser) return showAuthModal();
 
@@ -578,12 +613,7 @@
           connectBox.classList.remove('hidden');
           const btn = document.getElementById('account-connect-stripe-btn');
           if (btn) {
-            btn.onclick = async () => {
-              const r = await fetch('/api/stripe/connect', { method: 'POST' });
-              const d = await r.json();
-              if (d.url) window.location.href = d.url;
-              else alert(d.error || 'Could not start Stripe Connect');
-            };
+            btn.onclick = () => startStripeConnect(btn);
           }
         } else {
           connectBox.classList.add('hidden');
@@ -807,11 +837,8 @@
           <button type="button" class="ml-2 px-3 py-1 border border-slate-600 rounded-xl text-xs">Open Account</button>
         `;
         const btns = connectDiv.querySelectorAll('button');
-        btns[0].onclick = async () => {
-          const r = await fetch('/api/stripe/connect', { method: 'POST' });
-          const d = await r.json();
-          if (d.url) window.location.href = d.url;
-        };
+        btns[0].type = 'button';
+        btns[0].onclick = () => startStripeConnect(btns[0]);
         btns[1].onclick = () => showAccount();
         document.getElementById('view-my-comics').prepend(connectDiv);
       }
@@ -3344,8 +3371,25 @@
         }
       });
 
+      // Stripe Connect return / refresh from onboarding
+      const stripeConnect = urlParams.get('stripe_connect');
+      if (stripeConnect === 'return' || stripeConnect === 'refresh') {
+        window.history.replaceState({}, document.title, window.location.pathname);
+        await updateAuthUI();
+        if (stripeConnect === 'return') {
+          alert(currentUser && currentUser.stripe_account_id
+            ? 'Stripe account linked. You can receive creator payouts once onboarding is complete in Stripe.'
+            : 'Returned from Stripe. If Connect is still incomplete, open Account and try Connect Stripe again.');
+          if (currentUser) showAccount();
+        } else if (currentUser) {
+          alert('Stripe onboarding was interrupted. You can continue from Account → Connect Stripe.');
+          showAccount();
+        }
+      }
+
       // Show landing page by default
-      showHome();
+      if (!stripeConnect) showHome();
+      else if (!currentUser) showHome();
       guardSearchAgainstAutofill();
     }
 
@@ -3362,6 +3406,7 @@
     window.register = register;
     window.logout = logout;
     window.showForgotPassword = showForgotPassword;
+    window.startStripeConnect = startStripeConnect;
     window.resendFromLogin = resendFromLogin;
     window.resendVerification = resendVerification;
     window.showHome = showHome;

@@ -231,6 +231,9 @@ try {
 try {
   db.exec(`ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'user'`);
 } catch (e) {}
+try {
+  db.exec(`ALTER TABLE users ADD COLUMN stripe_account_id TEXT`);
+} catch (e) {}
 
 try {
   db.exec(`ALTER TABLE comics ADD COLUMN status TEXT DEFAULT 'draft'`);
@@ -2451,27 +2454,59 @@ app.post('/api/pages/:pageId/choice-labels', requireAuth, requireVerified, (req,
   res.json({ success: true, choices: updated });
 });
 
-// Creator connects Stripe account for payouts
-app.post('/api/stripe/connect', requireAuth, async (req, res) => {
-  if (!stripe) return res.status(500).json({ error: 'Payments not configured' });
-
-  const user = getCurrentUser(req);
-  let accountId = user.stripe_account_id;
-
-  if (!accountId) {
-    const account = await stripe.accounts.create({ type: 'express' });
-    accountId = account.id;
-    db.prepare('UPDATE users SET stripe_account_id = ? WHERE id = ?').run(accountId, req.session.userId);
+// Creator connects Stripe account for payouts (Express Connect onboarding)
+app.post('/api/stripe/connect', requireAuth, requireVerified, async (req, res) => {
+  if (!stripe) {
+    return res.status(503).json({
+      error: 'Stripe is not configured on the server (missing STRIPE_SECRET_KEY).',
+    });
   }
 
-  const link = await stripe.accountLinks.create({
-    account: accountId,
-    refresh_url: `${APP_URL}/`,
-    return_url: `${APP_URL}/`,
-    type: 'account_onboarding',
-  });
+  try {
+    const user = getCurrentUser(req);
+    if (!user) return res.status(401).json({ error: 'Not logged in' });
 
-  res.json({ url: link.url });
+    let accountId = user.stripe_account_id;
+
+    if (!accountId) {
+      const account = await stripe.accounts.create({
+        type: 'express',
+        email: user.email || undefined,
+        capabilities: {
+          card_payments: { requested: true },
+          transfers: { requested: true },
+        },
+        metadata: { pyp_user_id: String(user.id) },
+      });
+      accountId = account.id;
+      db.prepare('UPDATE users SET stripe_account_id = ? WHERE id = ?').run(accountId, req.session.userId);
+    }
+
+    const base = (process.env.APP_URL || APP_URL || 'https://pypstories.com').replace(/\/$/, '');
+    const link = await stripe.accountLinks.create({
+      account: accountId,
+      refresh_url: `${base}/?stripe_connect=refresh`,
+      return_url: `${base}/?stripe_connect=return`,
+      type: 'account_onboarding',
+    });
+
+    if (!link || !link.url) {
+      return res.status(502).json({ error: 'Stripe did not return an onboarding link.' });
+    }
+
+    res.json({ url: link.url });
+  } catch (err) {
+    console.error('Stripe Connect error:', err);
+    const msg = err && err.message ? String(err.message) : 'Stripe Connect failed';
+    // Common: Connect not enabled on the Stripe account, or platform profile incomplete
+    let hint = msg;
+    if (/signed up for Connect|connect.*not.*enabled|capabilities/i.test(msg)) {
+      hint = 'Stripe Connect is not fully enabled for this Stripe account. In Stripe Dashboard → Connect, complete platform profile and enable Express accounts, then try again.';
+    } else if (/No such api key|Invalid API Key/i.test(msg)) {
+      hint = 'Invalid Stripe secret key on the server. Check STRIPE_SECRET_KEY in .env (use sk_live_… or sk_test_…).';
+    }
+    res.status(502).json({ error: hint });
+  }
 });
 
 // Get list of genres for filter UI
