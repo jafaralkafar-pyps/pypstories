@@ -1026,23 +1026,21 @@
       document.getElementById('create-modal').classList.remove('hidden');
     }
 
-    function youtubeEmbedUrl(raw) {
+    /** Normalize env/config value into a normal YouTube watch URL (opens on YouTube). */
+    function youtubeWatchUrl(raw) {
       if (!raw) return '';
       const s = String(raw).trim();
       if (!s) return '';
-      // Already an embed URL
-      if (/youtube\.com\/embed\//i.test(s)) return s.split('&')[0];
-      // youtu.be/ID
       let m = s.match(/youtu\.be\/([a-zA-Z0-9_-]{6,})/);
-      if (m) return `https://www.youtube.com/embed/${m[1]}`;
-      // youtube.com/watch?v=ID
+      if (m) return `https://www.youtube.com/watch?v=${m[1]}`;
       m = s.match(/[?&]v=([a-zA-Z0-9_-]{6,})/);
-      if (m) return `https://www.youtube.com/embed/${m[1]}`;
-      // youtube.com/shorts/ID
+      if (m) return `https://www.youtube.com/watch?v=${m[1]}`;
+      m = s.match(/youtube\.com\/embed\/([a-zA-Z0-9_-]{6,})/);
+      if (m) return `https://www.youtube.com/watch?v=${m[1]}`;
       m = s.match(/youtube\.com\/shorts\/([a-zA-Z0-9_-]{6,})/);
-      if (m) return `https://www.youtube.com/embed/${m[1]}`;
-      // Bare video id
-      if (/^[a-zA-Z0-9_-]{11}$/.test(s)) return `https://www.youtube.com/embed/${s}`;
+      if (m) return `https://www.youtube.com/watch?v=${m[1]}`;
+      if (/^[a-zA-Z0-9_-]{11}$/.test(s)) return `https://www.youtube.com/watch?v=${s}`;
+      if (/^https?:\/\//i.test(s)) return s;
       return '';
     }
 
@@ -1050,26 +1048,25 @@
       const mount = document.getElementById('creator-tutorial');
       if (!mount) return;
 
-      const embed = youtubeEmbedUrl(window.__tutorialVideoUrl || '');
+      const watchUrl = youtubeWatchUrl(window.__tutorialVideoUrl || '');
 
-      const videoBlock = embed
-        ? `<div class="relative w-full rounded-2xl overflow-hidden border border-slate-700 bg-black" style="padding-top:56.25%;">
-             <iframe class="absolute inset-0 w-full h-full"
-               src="${embed}?rel=0"
-               title="How to create a story on Pick Your Path Stories"
-               allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-               allowfullscreen loading="lazy"></iframe>
-           </div>`
-        : `<div class="rounded-2xl border border-dashed border-slate-600 bg-slate-950/80 px-4 py-6 text-center text-sm text-slate-400">
+      const videoBlock = watchUrl
+        ? `<a href="${escapeHtml(watchUrl)}" target="_blank" rel="noopener noreferrer"
+             class="inline-flex items-center gap-2 px-4 py-2.5 rounded-2xl bg-red-600 hover:bg-red-500 text-white text-sm font-medium">
+             Watch how-to video on YouTube
+             <span class="text-red-100 text-xs opacity-90" aria-hidden="true">↗</span>
+           </a>
+           <p class="mt-2 text-[11px] text-slate-500">Opens YouTube in a new tab so it doesn’t take over this screen.</p>`
+        : `<div class="rounded-2xl border border-dashed border-slate-600 bg-slate-950/80 px-4 py-4 text-sm text-slate-400">
              <div class="text-slate-300 font-medium mb-1">Tutorial video coming soon</div>
-             <p class="text-xs text-slate-500 max-w-md mx-auto">A short walkthrough will appear here once it is uploaded. Until then, follow the simple steps below.</p>
+             <p class="text-xs text-slate-500">Until then, follow the simple steps below.</p>
            </div>`;
 
       mount.innerHTML = `
         <div class="mb-6 rounded-3xl border border-slate-700 bg-slate-950/60 p-4 sm:p-5">
           <div class="text-sm font-semibold text-slate-200 mb-1">New here? How to build a story</div>
           <p class="text-xs text-slate-500 mb-3">Create your story, upload page images, then link choices in Build Structure.</p>
-          ${videoBlock}
+          <div class="mb-1">${videoBlock}</div>
           <ol class="mt-4 space-y-2 text-xs sm:text-sm text-slate-400 list-decimal list-inside">
             <li><span class="text-slate-300">Name your story</span> — title, short description, genre, and price (0 = free).</li>
             <li><span class="text-slate-300">Click Create Story</span> — opens the editor for this story.</li>
