@@ -384,6 +384,18 @@
         errorEl.classList.remove('hidden');
         return;
       }
+      if (username) {
+        if (username.length < 3 || username.length > 24) {
+          errorEl.textContent = 'Display name must be 3–24 characters';
+          errorEl.classList.remove('hidden');
+          return;
+        }
+        if (!/^[a-zA-Z0-9_-]+$/.test(username)) {
+          errorEl.textContent = 'Display name can only use letters, numbers, underscores, and hyphens';
+          errorEl.classList.remove('hidden');
+          return;
+        }
+      }
       
       const res = await fetch('/api/register', {
         method: 'POST',

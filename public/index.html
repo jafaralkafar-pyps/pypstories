@@ -690,7 +690,9 @@
       <div id="register-form" class="hidden">
         <div class="space-y-4">
           <input id="reg-email" type="email" placeholder="Email address (required)" class="w-full bg-slate-950 border border-slate-700 rounded-2xl px-5 py-3 text-sm">
-          <input id="reg-username" type="text" placeholder="Display name (optional)" class="w-full bg-slate-950 border border-slate-700 rounded-2xl px-5 py-3 text-sm">
+          <input id="reg-username" type="text" placeholder="Display name (optional)" maxlength="24"
+                 class="w-full bg-slate-950 border border-slate-700 rounded-2xl px-5 py-3 text-sm">
+          <p class="text-[10px] text-slate-500 -mt-2">3–24 characters: letters, numbers, _ or -. No official/brand names or offensive language.</p>
           <input id="reg-password" type="password" placeholder="Password (min 8 characters)" class="w-full bg-slate-950 border border-slate-700 rounded-2xl px-5 py-3 text-sm">
           <input id="reg-password2" type="password" placeholder="Confirm password" class="w-full bg-slate-950 border border-slate-700 rounded-2xl px-5 py-3 text-sm">
         </div>

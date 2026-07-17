@@ -9,6 +9,7 @@ const Database = require('better-sqlite3');
 const multer = require('multer');
 const storageService = require('./services/storage');
 const credits = require('./services/credits');
+const { validateUsername, validatePublicText } = require('./services/moderation');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
@@ -811,9 +812,17 @@ app.post('/api/register', authLimiter, async (req, res) => {
     return res.status(409).json({ error: 'An account with this email already exists' });
   }
 
-  // Check username uniqueness if provided
-  if (username && username.length > 0) {
-    const usernameExists = db.prepare('SELECT id FROM users WHERE username = ?').get(username);
+  // Username: format + blocklist (brand / reserved / abuse)
+  const nameCheck = validateUsername(username);
+  if (!nameCheck.ok) {
+    return res.status(400).json({ error: nameCheck.error });
+  }
+  const cleanUsername = nameCheck.username;
+
+  if (cleanUsername) {
+    const usernameExists = db.prepare(
+      'SELECT id FROM users WHERE lower(username) = lower(?)'
+    ).get(cleanUsername);
     if (usernameExists) {
       return res.status(409).json({ error: 'Username is already taken' });
     }
@@ -828,7 +837,7 @@ app.post('/api/register', authLimiter, async (req, res) => {
   const result = db.prepare(`
     INSERT INTO users (email, username, password_hash, verification_token, verification_expires, email_verified)
     VALUES (?, ?, ?, ?, ?, 0)
-  `).run(email.toLowerCase(), username || null, hash, verificationToken, verificationExpires);
+  `).run(email.toLowerCase(), cleanUsername, hash, verificationToken, verificationExpires);
 
   const userId = result.lastInsertRowid;
 
@@ -1775,9 +1784,15 @@ app.post('/api/comics/:id/comments', requireAuth, requireVerified, (req, res) =>
     return res.status(400).json({ error: 'Only published stories can be commented on' });
   }
 
+  const textCheck = validatePublicText(req.body.body, {
+    field: 'Comment',
+    minLen: 2,
+    maxLen: 2000,
+  });
+  if (!textCheck.ok) {
+    return res.status(400).json({ error: textCheck.error });
+  }
   const body = String(req.body.body || '').trim();
-  if (body.length < 2) return res.status(400).json({ error: 'Comment is too short' });
-  if (body.length > 2000) return res.status(400).json({ error: 'Comment must be under 2000 characters' });
 
   let chapterId = parseInt(req.body.chapter_id, 10);
   if (Number.isNaN(chapterId) || chapterId < 0) chapterId = 0;
