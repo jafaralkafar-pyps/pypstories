@@ -3568,6 +3568,8 @@
         if (form) form.reset();
         const count = document.getElementById('contact-msg-count');
         if (count) count.textContent = '0';
+        // Brief success flash, then close
+        setTimeout(() => closeContactModal(), 1200);
       } catch (e) {
         if (err) {
           err.textContent = 'Network error. Please try again.';
