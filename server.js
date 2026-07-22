@@ -110,6 +110,14 @@ const authLimiter = rateLimit({
   legacyHeaders: false,
 });
 
+const contactLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000, // 1 hour
+  max: 8,
+  message: { error: 'Too many contact messages. Please try again later.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 // Ensure directories exist
 const DATA_DIR = path.join(__dirname, 'data');
 const UPLOADS_DIR = path.join(__dirname, 'uploads', 'comics');
@@ -277,6 +285,18 @@ try {
 try {
   db.exec(`ALTER TABLE choices ADD COLUMN choice_image TEXT`);
 } catch (e) {}
+
+// Contact form submissions (also emailed when mail is configured)
+db.exec(`
+  CREATE TABLE IF NOT EXISTS contact_messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    email TEXT NOT NULL,
+    message TEXT NOT NULL,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    ip TEXT
+  );
+`);
 
 // Ratings & comments (chapter_id = 0 means whole story)
 db.exec(`
@@ -1498,6 +1518,79 @@ app.post('/api/creator/payout', requireAuth, requireVerified, async (req, res) =
   } catch (e) {
     res.status(400).json({ error: e.message || 'Payout failed' });
   }
+});
+
+// Footer contact form
+app.post('/api/contact', contactLimiter, async (req, res) => {
+  const name = String(req.body.name || '').trim().slice(0, 80);
+  const email = String(req.body.email || '').trim().toLowerCase().slice(0, 120);
+  const message = String(req.body.message || '').trim().slice(0, 2000);
+
+  if (!name || name.length < 2) {
+    return res.status(400).json({ error: 'Please enter your name' });
+  }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return res.status(400).json({ error: 'Please enter a valid email address' });
+  }
+  const textCheck = validatePublicText(message, {
+    field: 'Message',
+    minLen: 10,
+    maxLen: 2000,
+  });
+  if (!textCheck.ok) {
+    return res.status(400).json({ error: textCheck.error });
+  }
+
+  const ip = String(req.ip || req.headers['x-forwarded-for'] || '').slice(0, 80);
+
+  try {
+    db.prepare(`
+      INSERT INTO contact_messages (name, email, message, ip)
+      VALUES (?, ?, ?, ?)
+    `).run(name, email, message, ip);
+  } catch (e) {
+    console.error('Contact save failed:', e);
+    return res.status(500).json({ error: 'Could not save your message. Please try again.' });
+  }
+
+  const to =
+    (process.env.CONTACT_EMAIL || '').trim() ||
+    (process.env.EMAIL_FROM || '').match(/[\w.+-]+@[\w.-]+\.\w+/)?.[0] ||
+    '';
+
+  if (to) {
+    try {
+      const safeName = name.replace(/[<>&]/g, '');
+      const safeEmail = email.replace(/[<>&]/g, '');
+      const safeMsg = message
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/\n/g, '<br>');
+      await sendEmail(
+        to,
+        `[PYPStories contact] from ${safeName}`,
+        `
+        <div style="font-family:system-ui,sans-serif;max-width:560px;margin:0 auto;padding:16px;">
+          <h2>New contact message</h2>
+          <p><strong>Name:</strong> ${safeName}</p>
+          <p><strong>Email:</strong> <a href="mailto:${safeEmail}">${safeEmail}</a></p>
+          <p><strong>Message:</strong></p>
+          <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px;">${safeMsg}</div>
+        </div>
+        `
+      );
+    } catch (e) {
+      console.error('Contact email failed (message still saved):', e.message || e);
+    }
+  } else {
+    console.warn('CONTACT_EMAIL / EMAIL_FROM not set — contact message saved to DB only');
+  }
+
+  res.json({
+    success: true,
+    message: 'Thanks! Your message was sent. We’ll get back to you by email if a reply is needed.',
+  });
 });
 
 // Public client config (AdSense IDs are meant to be public in page source)

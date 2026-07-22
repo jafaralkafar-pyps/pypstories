@@ -3487,8 +3487,102 @@
       guardSearchAgainstAutofill();
     }
 
+    function showContactModal() {
+      const modal = document.getElementById('contact-modal');
+      if (!modal) return;
+      const err = document.getElementById('contact-error');
+      const ok = document.getElementById('contact-success');
+      if (err) { err.classList.add('hidden'); err.textContent = ''; }
+      if (ok) { ok.classList.add('hidden'); ok.textContent = ''; }
+      const form = document.getElementById('contact-form');
+      if (form) form.reset();
+      const count = document.getElementById('contact-msg-count');
+      if (count) count.textContent = '0';
+      // Prefill email if logged in
+      const emailEl = document.getElementById('contact-email');
+      const nameEl = document.getElementById('contact-name');
+      if (currentUser) {
+        if (emailEl && currentUser.email) emailEl.value = currentUser.email;
+        if (nameEl && currentUser.username) nameEl.value = currentUser.username;
+      }
+      modal.classList.remove('hidden');
+      const msg = document.getElementById('contact-message');
+      if (msg && !msg.dataset.bound) {
+        msg.dataset.bound = '1';
+        msg.addEventListener('input', () => {
+          const c = document.getElementById('contact-msg-count');
+          if (c) c.textContent = String((msg.value || '').length);
+        });
+      }
+    }
+
+    function closeContactModal() {
+      const modal = document.getElementById('contact-modal');
+      if (modal) modal.classList.add('hidden');
+    }
+
+    async function submitContactForm() {
+      const name = (document.getElementById('contact-name')?.value || '').trim();
+      const email = (document.getElementById('contact-email')?.value || '').trim();
+      const message = (document.getElementById('contact-message')?.value || '').trim();
+      const err = document.getElementById('contact-error');
+      const ok = document.getElementById('contact-success');
+      const btn = document.getElementById('contact-submit');
+      if (err) { err.classList.add('hidden'); err.textContent = ''; }
+      if (ok) { ok.classList.add('hidden'); ok.textContent = ''; }
+
+      if (!name || name.length < 2) {
+        if (err) { err.textContent = 'Please enter your name'; err.classList.remove('hidden'); }
+        return;
+      }
+      if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        if (err) { err.textContent = 'Please enter a valid email'; err.classList.remove('hidden'); }
+        return;
+      }
+      if (message.length < 10) {
+        if (err) { err.textContent = 'Please write a short message (at least 10 characters)'; err.classList.remove('hidden'); }
+        return;
+      }
+
+      if (btn) { btn.disabled = true; btn.textContent = 'Sending…'; }
+      try {
+        const r = await fetch('/api/contact', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'same-origin',
+          body: JSON.stringify({ name, email, message }),
+        });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) {
+          if (err) {
+            err.textContent = d.error || 'Could not send message';
+            err.classList.remove('hidden');
+          }
+          return;
+        }
+        if (ok) {
+          ok.textContent = d.message || 'Thanks! Your message was sent.';
+          ok.classList.remove('hidden');
+        }
+        const form = document.getElementById('contact-form');
+        if (form) form.reset();
+        const count = document.getElementById('contact-msg-count');
+        if (count) count.textContent = '0';
+      } catch (e) {
+        if (err) {
+          err.textContent = 'Network error. Please try again.';
+          err.classList.remove('hidden');
+        }
+      } finally {
+        if (btn) { btn.disabled = false; btn.textContent = 'Send message'; }
+      }
+    }
+
     // Expose handlers used by inline onclick attributes
     window.previewComic = previewComic;
+    window.showContactModal = showContactModal;
+    window.closeContactModal = closeContactModal;
+    window.submitContactForm = submitContactForm;
     window.closeCreateModal = closeCreateModal;
     window.openStoryBuilder = openStoryBuilder;
     window.showCreateComic = showCreateComic;

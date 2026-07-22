@@ -733,11 +733,53 @@
     </div>
   </div>
 
+  <!-- Contact modal -->
+  <div id="contact-modal" onclick="if (event.target.id === 'contact-modal') closeContactModal()"
+       class="hidden fixed inset-0 bg-black/80 z-[85] flex items-center justify-center p-4">
+    <div onclick="event.stopImmediatePropagation()"
+         class="bg-slate-900 border border-slate-700 rounded-3xl w-full max-w-md p-5 sm:p-6">
+      <div class="flex items-center justify-between mb-4">
+        <h3 class="text-lg font-semibold tracking-tight">Contact us</h3>
+        <button type="button" onclick="closeContactModal()" class="text-slate-400 hover:text-white px-2 text-sm">Close</button>
+      </div>
+      <p class="text-xs text-slate-500 mb-4">Questions, feedback, or creator support — send a short message and we’ll get back to you by email.</p>
+      <form id="contact-form" onsubmit="event.preventDefault(); submitContactForm();" class="space-y-3">
+        <div>
+          <label class="text-xs text-slate-400" for="contact-name">Name</label>
+          <input id="contact-name" name="name" type="text" maxlength="80" required autocomplete="name"
+                 class="w-full mt-1 bg-slate-950 border border-slate-700 rounded-2xl px-4 py-2.5 text-sm">
+        </div>
+        <div>
+          <label class="text-xs text-slate-400" for="contact-email">Email</label>
+          <input id="contact-email" name="email" type="email" maxlength="120" required autocomplete="email"
+                 class="w-full mt-1 bg-slate-950 border border-slate-700 rounded-2xl px-4 py-2.5 text-sm">
+        </div>
+        <div>
+          <label class="text-xs text-slate-400" for="contact-message">Message</label>
+          <textarea id="contact-message" name="message" rows="4" maxlength="2000" required
+                    placeholder="Keep it short…"
+                    class="w-full mt-1 bg-slate-950 border border-slate-700 rounded-2xl px-4 py-2.5 text-sm"></textarea>
+          <div class="text-[10px] text-slate-600 mt-1 text-right"><span id="contact-msg-count">0</span>/2000</div>
+        </div>
+        <button type="submit" id="contact-submit"
+                class="w-full py-2.5 bg-white text-slate-900 rounded-2xl text-sm font-medium hover:bg-slate-100">
+          Send message
+        </button>
+        <div id="contact-error" class="text-xs text-red-400 hidden"></div>
+        <div id="contact-success" class="text-xs text-emerald-400 hidden"></div>
+      </form>
+    </div>
+  </div>
+
   <!-- Site footer (helps visitors + search engines) -->
   <footer class="border-t border-slate-800 mt-8 py-8 text-center text-xs sm:text-sm text-slate-500">
     <div class="max-w-6xl mx-auto px-4 sm:px-6 space-y-2">
       <p class="text-slate-400 font-medium">Pick Your Path Stories · PYPStories.com</p>
       <p>Choose-your-own-adventure · Interactive comics · Webtoon-style paths · Digital books</p>
+      <p>
+        <button type="button" onclick="showContactModal()"
+                class="text-blue-400 hover:text-blue-300 underline underline-offset-2">Contact us</button>
+      </p>
       <p class="text-slate-600">© <span id="footer-year"></span> PYPStories. Read a path or create your own.</p>
     </div>
   </footer>
