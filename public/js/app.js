@@ -1087,6 +1087,12 @@
             <li><span class="text-slate-300">Build Structure</span> — set the start page, drag pages into choice slots, type choice labels, Save.</li>
             <li><span class="text-slate-300">Preview</span> — try reading it, then Submit for Review when ready.</li>
           </ol>
+          <p class="mt-3 text-[11px] text-slate-500">
+            All stories must follow our
+            <a href="/content-policy.html" target="_blank" rel="noopener" class="text-blue-400 hover:text-blue-300 underline">Content Policy</a>
+            (family-friendly: no adult content or profanity).
+            <a href="/terms.html" target="_blank" rel="noopener" class="text-blue-400 hover:text-blue-300 underline">Terms of Service</a>
+          </p>
         </div>
       `;
     }
