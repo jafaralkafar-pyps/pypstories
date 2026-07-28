@@ -1,8 +1,15 @@
 # https://pypstories.com/robots.txt
 User-agent: *
 Allow: /
+Allow: /terms.html
+Allow: /content-policy.html
+Allow: /brand/
+Allow: /css/
+Allow: /js/
 
-# Prefer indexing the public site; app APIs are not for search results
+# App/API and private app surfaces — not for Google Search results
 Disallow: /api/
+Disallow: /uploads/
 
+# Prefer the clean homepage URL (canonical is https://pypstories.com/)
 Sitemap: https://pypstories.com/sitemap.xml
