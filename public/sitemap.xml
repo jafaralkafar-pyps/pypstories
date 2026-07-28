@@ -6,6 +6,11 @@
     <priority>1.0</priority>
   </url>
   <url>
+    <loc>https://pypstories.com/how-it-works.html</loc>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
     <loc>https://pypstories.com/terms.html</loc>
     <changefreq>monthly</changefreq>
     <priority>0.4</priority>
