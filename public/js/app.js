@@ -55,8 +55,8 @@
     }
 
     /**
-     * Exactly one AdSense unit in the reader, refreshed when the reader page changes.
-     * Hidden for story owners and when AdSense is not configured.
+     * Exactly one AdSense unit in the reader, only when there is real story content.
+     * Avoids "ads without publisher content" on empty/shell screens.
      */
     async function updateReaderAd() {
       const adContainer = document.getElementById('reader-ad');
@@ -67,7 +67,17 @@
         Number(readerComic.user_id) === Number(currentUser.id)
       );
 
-      if (!adsenseConfig.enabled || !adsenseConfig.client || !adsenseConfig.slot || isOwner) {
+      const page = currentReaderPage;
+      const hasPublisherContent = !!(
+        page &&
+        readerComic &&
+        readerComic.status === 'published' &&
+        ((page.image_path && String(page.image_path).trim()) ||
+          (page.text_content && String(page.text_content).trim().length > 40) ||
+          (page.title && String(page.title).trim().length > 0 && page.image_path))
+      );
+
+      if (!adsenseConfig.enabled || !adsenseConfig.client || !adsenseConfig.slot || isOwner || !hasPublisherContent) {
         adContainer.classList.add('hidden');
         adContainer.innerHTML = '';
         return;
@@ -75,7 +85,6 @@
 
       const ready = await ensureAdSenseScript();
       adContainer.classList.remove('hidden');
-      // New <ins> each page so AdSense treats each reader page as one unit
       adContainer.innerHTML = `
         <div class="text-[10px] text-slate-500 mb-1.5">Advertisement</div>
         <ins class="adsbygoogle"
@@ -86,10 +95,7 @@
              data-full-width-responsive="true"></ins>
       `;
 
-      if (!ready) {
-        console.warn('[Ads] AdSense script not loaded yet');
-        return;
-      }
+      if (!ready) return;
       try {
         (window.adsbygoogle = window.adsbygoogle || []).push({});
       } catch (e) {
