@@ -880,11 +880,29 @@
         const div = document.createElement('div');
         div.className = 'comic-card bg-slate-900 border border-slate-800 rounded-3xl p-4 sm:p-5 cursor-pointer';
         const status = comic.status || 'draft';
-        const statusText = status.charAt(0).toUpperCase() + status.slice(1);
+        const statusLabels = {
+          draft: 'Draft',
+          submitted: 'Submitted',
+          in_review: 'In review',
+          changes_requested: 'Changes requested',
+          approved: 'Approved',
+          published: 'Published',
+          quarantined: 'Quarantined',
+        };
+        const statusText = statusLabels[status] || (status.charAt(0).toUpperCase() + status.slice(1).replace(/_/g, ' '));
+        const statusColor =
+          status === 'published' ? 'text-green-400'
+          : status === 'approved' ? 'text-blue-400'
+          : status === 'quarantined' ? 'text-red-400'
+          : 'text-amber-400';
+        const quarantineNote = status === 'quarantined'
+          ? `<div class="mt-2 text-xs text-red-300/90 leading-snug">Content filter flagged text. Edit titles, page text, or choice labels to remove disallowed language, then re-submit. See <a href="/content-policy.html" class="underline hover:text-red-200" onclick="event.stopPropagation()">Content Policy</a>.</div>`
+          : '';
         div.innerHTML = `
           <div class="font-semibold text-xl">${comic.title}</div>
           <div class="text-sm text-slate-400 mt-0.5">${comic.genre} • ${comic.page_count || 0} pages ${comic.price ? '• $' + comic.price : '• Free'}</div>
-          <div class="mt-1 text-xs ${status === 'published' ? 'text-green-400' : status === 'approved' ? 'text-blue-400' : 'text-amber-400'}">Status: ${statusText}</div>
+          <div class="mt-1 text-xs ${statusColor}">Status: ${statusText}</div>
+          ${quarantineNote}
           <div class="mt-4 text-xs flex flex-wrap gap-3 text-slate-400">
             <span>${comic.view_count || 0} views</span>
             <span class="text-amber-300/90">${comic.avg_rating != null ? '★ ' + comic.avg_rating : 'No ratings'}${comic.rating_count ? ' (' + comic.rating_count + ')' : ''}</span>
@@ -893,8 +911,8 @@
           <div class="mt-5 flex gap-2 text-sm">
             <button class="flex-1 py-2 bg-slate-800 hover:bg-slate-700 rounded-2xl text-xs sm:text-sm" data-action="edit">Edit</button>
             <button class="flex-1 py-2 border border-slate-700 hover:bg-slate-800 rounded-2xl text-xs sm:text-sm" data-action="read">Read</button>
-            ${ (status === 'draft' || status === 'changes_requested') ? `
-              <button class="flex-1 py-2 bg-blue-600 hover:bg-blue-500 rounded-2xl text-xs sm:text-sm text-white" data-action="submit">Submit for Review</button>
+            ${ (status === 'draft' || status === 'changes_requested' || status === 'quarantined') ? `
+              <button class="flex-1 py-2 bg-blue-600 hover:bg-blue-500 rounded-2xl text-xs sm:text-sm text-white" data-action="submit">${status === 'quarantined' ? 'Re-submit after fix' : 'Submit for Review'}</button>
             ` : ''}
             ${ status === 'approved' ? `
               <button class="flex-1 py-2 bg-green-600 hover:bg-green-500 rounded-2xl text-xs sm:text-sm text-white" data-action="publish">Publish</button>
@@ -937,16 +955,26 @@
         const div = document.createElement('div');
         div.className = 'comic-card bg-slate-900 border border-slate-800 rounded-3xl p-4 sm:p-5';
         const isClaimedByMe = story.claimed_by && story.claimed_by === currentUser.username;
-        const statusLabel = story.status === 'submitted' ? 'Submitted' : 'In Review';
+        const isQuarantined = story.status === 'quarantined';
+        const statusLabel = isQuarantined
+          ? 'Quarantined (auto filter)'
+          : story.status === 'submitted' ? 'Submitted' : 'In Review';
+        const statusColor = isQuarantined ? 'text-red-400' : 'text-slate-400';
+        const quarantineNote = isQuarantined && story.review_notes
+          ? `<div class="mt-2 text-xs text-red-300/90 leading-snug">${String(story.review_notes).replace(/</g, '&lt;').slice(0, 300)}</div>`
+          : isQuarantined
+            ? `<div class="mt-2 text-xs text-red-300/90">Waiting for creator to fix flagged text and re-submit.</div>`
+            : '';
         div.innerHTML = `
           <div class="font-semibold text-xl">${story.title}</div>
           <div class="text-sm text-slate-400 mt-0.5">by ${story.author} • ${story.page_count || 0} pages</div>
-          <div class="mt-2 text-xs text-slate-400">Status: ${statusLabel} ${story.claimed_by ? '• Claimed by ' + story.claimed_by : ''}</div>
+          <div class="mt-2 text-xs ${statusColor}">Status: ${statusLabel} ${story.claimed_by ? '• Claimed by ' + story.claimed_by : ''}</div>
+          ${quarantineNote}
           <div class="mt-4 flex gap-2 text-sm">
-            ${!story.claimed_by ? `
+            ${!isQuarantined && !story.claimed_by ? `
               <button class="flex-1 py-2 bg-blue-600 hover:bg-blue-500 rounded-2xl text-xs sm:text-sm text-white" data-action="claim">Claim for Review</button>
             ` : ''}
-            ${isClaimedByMe ? `
+            ${!isQuarantined && isClaimedByMe ? `
               <button class="flex-1 py-2 bg-green-600 hover:bg-green-500 rounded-2xl text-xs sm:text-sm text-white" data-action="approve">Approve</button>
               <button class="flex-1 py-2 bg-amber-600 hover:bg-amber-500 rounded-2xl text-xs sm:text-sm text-white" data-action="changes">Request Changes</button>
             ` : ''}
@@ -3436,16 +3464,28 @@
             } else if (actionBtn.dataset.action === 'read') {
               openReader(id);
             } else if (actionBtn.dataset.action === 'submit') {
-              fetch(`/api/comics/${id}/submit`, { method: 'POST' }).then(() => {
-                alert('Submitted for review.');
-                showMyComics();
-              });
+              fetch(`/api/comics/${id}/submit`, { method: 'POST' })
+                .then(async (r) => {
+                  const data = await r.json().catch(() => ({}));
+                  if (!r.ok) {
+                    const detail = data.issues && data.issues.length > 1
+                      ? '\n\n• ' + data.issues.slice(0, 5).join('\n• ')
+                      : '';
+                    alert((data.error || 'Could not submit for review.') + detail);
+                    showMyComics();
+                    return;
+                  }
+                  alert('Submitted for review.');
+                  showMyComics();
+                })
+                .catch(() => alert('Could not submit for review.'));
             } else if (actionBtn.dataset.action === 'publish') {
               fetch(`/api/comics/${id}/publish`, { method: 'POST' })
                 .then(async (r) => {
                   const data = await r.json().catch(() => ({}));
                   if (!r.ok) {
                     alert(data.error || 'Could not publish story.');
+                    showMyComics();
                     return;
                   }
                   alert('Story published! It is now live on Browse.');

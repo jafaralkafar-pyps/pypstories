@@ -9,7 +9,12 @@ const Database = require('better-sqlite3');
 const multer = require('multer');
 const storageService = require('./services/storage');
 const credits = require('./services/credits');
-const { validateUsername, validatePublicText } = require('./services/moderation');
+const {
+  validateUsername,
+  validatePublicText,
+  validateContentText,
+  scanStoryBundle,
+} = require('./services/moderation');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
@@ -339,6 +344,7 @@ try {
 // NOTE: Do NOT auto-publish comics on startup.
 // Public browse only shows status = 'published'.
 // Creators must: draft → submit → editor approve → creator publish.
+// Programmatic text filter can set status = 'quarantined' (blocks submit/publish until fixed).
 
 // Ensure any legacy null statuses are drafts (not public)
 try {
@@ -346,6 +352,44 @@ try {
     UPDATE comics SET status = 'draft' WHERE status IS NULL OR status = ''
   `).run();
 } catch (e) {}
+
+/** Load all scannable text for a comic (title, description, pages, choices, chapters). */
+function loadComicContentBundle(comicId) {
+  const comic = db.prepare('SELECT title, description FROM comics WHERE id = ?').get(comicId);
+  if (!comic) return null;
+  const pages = db.prepare(
+    'SELECT id, title, text_content FROM pages WHERE comic_id = ?'
+  ).all(comicId);
+  const choices = db.prepare(`
+    SELECT ch.choice_text
+    FROM choices ch
+    JOIN pages p ON p.id = ch.from_page_id
+    WHERE p.comic_id = ?
+  `).all(comicId);
+  let chapters = [];
+  try {
+    chapters = db.prepare('SELECT title FROM chapters WHERE comic_id = ?').all(comicId);
+  } catch (_) { /* chapters table may be absent on very old DBs */ }
+  return {
+    title: comic.title,
+    description: comic.description,
+    pages,
+    choices,
+    chapters,
+  };
+}
+
+/** Mark story quarantined (auto content filter). Reuses review_notes for reason. */
+function quarantineComic(comicId, reason) {
+  const note = String(reason || 'Automatically quarantined by content filter').slice(0, 2000);
+  db.prepare(`
+    UPDATE comics
+    SET status = 'quarantined',
+        review_notes = ?,
+        last_reviewed_at = datetime('now')
+    WHERE id = ?
+  `).run(note, comicId);
+}
 
 
 // Multer config - use memory storage so we can pass buffer to abstracted storage service
@@ -1426,8 +1470,15 @@ app.post('/api/comics/:id/chapters', requireAuth, requireVerified, (req, res) =>
   if (!comic || !sameUserId(comic.user_id, req.session.userId)) {
     return res.status(403).json({ error: 'Not your comic' });
   }
-  const title = (req.body.title || '').trim();
-  if (!title) return res.status(400).json({ error: 'Title required' });
+  const titleCheck = validateContentText(req.body.title, {
+    field: 'Chapter title',
+    allowEmpty: false,
+    minLen: 1,
+    maxLen: 200,
+  });
+  if (!titleCheck.ok) {
+    return res.status(400).json({ error: titleCheck.error, code: titleCheck.code });
+  }
 
   let price_cents = Math.max(0, Math.round(parseFloat(req.body.price || 0) * 100));
   // Chapters can be free or any positive cent amount (e.g. $0.99); full-story min does not apply
@@ -1438,7 +1489,7 @@ app.post('/api/comics/:id/chapters', requireAuth, requireVerified, (req, res) =>
   const result = db.prepare(`
     INSERT INTO chapters (comic_id, title, sort_order, price_cents)
     VALUES (?, ?, ?, ?)
-  `).run(comicId, title, maxOrder + 1, price_cents);
+  `).run(comicId, titleCheck.text, maxOrder + 1, price_cents);
 
   const chapter = db.prepare('SELECT * FROM chapters WHERE id = ?').get(result.lastInsertRowid);
   res.status(201).json(chapter);
@@ -1456,8 +1507,17 @@ app.patch('/api/chapters/:id', requireAuth, requireVerified, (req, res) => {
   const updates = [];
   const values = [];
   if (req.body.title !== undefined) {
+    const titleCheck = validateContentText(req.body.title, {
+      field: 'Chapter title',
+      allowEmpty: false,
+      minLen: 1,
+      maxLen: 200,
+    });
+    if (!titleCheck.ok) {
+      return res.status(400).json({ error: titleCheck.error, code: titleCheck.code });
+    }
     updates.push('title = ?');
-    values.push(String(req.body.title).trim());
+    values.push(titleCheck.text);
   }
   if (req.body.price !== undefined) {
     updates.push('price_cents = ?');
@@ -2001,6 +2061,23 @@ app.post('/api/comics', requireAuth, requireVerified, (req, res) => {
   const { title, description = '', genre = 'Other', price = 0 } = req.body;
   if (!title) return res.status(400).json({ error: 'Title is required' });
 
+  const titleCheck = validateContentText(title, {
+    field: 'Story title',
+    allowEmpty: false,
+    minLen: 1,
+    maxLen: 200,
+  });
+  if (!titleCheck.ok) {
+    return res.status(400).json({ error: titleCheck.error, code: titleCheck.code });
+  }
+  const descCheck = validateContentText(description, {
+    field: 'Story description',
+    maxLen: 5000,
+  });
+  if (!descCheck.ok) {
+    return res.status(400).json({ error: descCheck.error, code: descCheck.code });
+  }
+
   const price_cents = Math.max(0, Math.round(parseFloat(price) * 100));
   if (price_cents > 0 && price_cents < credits.FULL_STORY_MIN_CENTS) {
     return res.status(400).json({
@@ -2012,7 +2089,7 @@ app.post('/api/comics', requireAuth, requireVerified, (req, res) => {
   const result = db.prepare(`
     INSERT INTO comics (user_id, title, description, genre, price_cents, status)
     VALUES (?, ?, ?, ?, ?, 'draft')
-  `).run(req.session.userId, title, description, genre, price_cents);
+  `).run(req.session.userId, titleCheck.text, descCheck.text, genre, price_cents);
 
   const comic = db.prepare('SELECT * FROM comics WHERE id = ?').get(result.lastInsertRowid);
   res.status(201).json(comic);
@@ -2038,13 +2115,28 @@ app.post('/api/comics/:id', requireAuth, requireVerified, (req, res) => {
   let values = [];
 
   if (title !== undefined) {
-    if (!title.trim()) return res.status(400).json({ error: 'Title is required' });
+    const titleCheck = validateContentText(title, {
+      field: 'Story title',
+      allowEmpty: false,
+      minLen: 1,
+      maxLen: 200,
+    });
+    if (!titleCheck.ok) {
+      return res.status(400).json({ error: titleCheck.error, code: titleCheck.code });
+    }
     updates.push('title = ?');
-    values.push(title.trim());
+    values.push(titleCheck.text);
   }
   if (description !== undefined) {
+    const descCheck = validateContentText(description, {
+      field: 'Story description',
+      maxLen: 5000,
+    });
+    if (!descCheck.ok) {
+      return res.status(400).json({ error: descCheck.error, code: descCheck.code });
+    }
     updates.push('description = ?');
-    values.push(description.trim());
+    values.push(descCheck.text);
   }
   if (genre !== undefined) {
     updates.push('genre = ?');
@@ -2098,24 +2190,43 @@ app.post('/api/comics/:id/cover', requireAuth, requireVerified, uploadSingle('co
 
 // === REVIEW WORKFLOW (Option A - Shared queue with claiming) ===
 
-// Creator submits for review
+// Creator submits for review (full content scan first; fail → quarantine)
 app.post('/api/comics/:id/submit', requireAuth, requireVerified, (req, res) => {
   const comicId = req.params.id;
   const comic = db.prepare('SELECT * FROM comics WHERE id = ?').get(comicId);
   if (!comic || !sameUserId(comic.user_id, req.session.userId)) {
     return res.status(403).json({ error: 'Not your comic' });
   }
-  if (comic.status !== 'draft' && comic.status !== 'changes_requested') {
-    return res.status(400).json({ error: 'Can only submit drafts or stories where changes were requested' });
+  if (
+    comic.status !== 'draft' &&
+    comic.status !== 'changes_requested' &&
+    comic.status !== 'quarantined'
+  ) {
+    return res.status(400).json({
+      error: 'Can only submit drafts, stories where changes were requested, or stories you fixed after quarantine',
+    });
   }
+
+  const bundle = loadComicContentBundle(comicId);
+  const scan = scanStoryBundle(bundle || {});
+  if (!scan.ok) {
+    quarantineComic(comicId, 'Auto-quarantine on submit: ' + scan.error);
+    return res.status(400).json({
+      error: scan.error,
+      code: 'CONTENT_FILTER',
+      status: 'quarantined',
+      issues: scan.issues,
+    });
+  }
+
   db.prepare(`
-    UPDATE comics SET status = 'submitted', submitted_at = datetime('now')
+    UPDATE comics SET status = 'submitted', submitted_at = datetime('now'), review_notes = NULL
     WHERE id = ?
   `).run(comicId);
   res.json({ success: true, status: 'submitted' });
 });
 
-// Review queue for editors
+// Review queue for editors (includes auto-quarantined for visibility)
 app.get('/api/admin/pending-stories', requireAuth, requireEditor, (req, res) => {
   const pending = db.prepare(`
     SELECT c.*, 
@@ -2124,8 +2235,10 @@ app.get('/api/admin/pending-stories', requireAuth, requireEditor, (req, res) => 
            (SELECT username FROM users WHERE id = c.reviewed_by) as claimed_by
     FROM comics c
     JOIN users u ON u.id = c.user_id
-    WHERE c.status IN ('submitted', 'in_review')
-    ORDER BY c.submitted_at ASC
+    WHERE c.status IN ('submitted', 'in_review', 'quarantined')
+    ORDER BY
+      CASE c.status WHEN 'quarantined' THEN 0 WHEN 'submitted' THEN 1 ELSE 2 END,
+      c.submitted_at ASC
   `).all();
   res.json(pending);
 });
@@ -2201,11 +2314,32 @@ app.post('/api/comics/:id/publish', requireAuth, requireVerified, (req, res) => 
   if (!comic || !sameUserId(comic.user_id, req.session.userId)) {
     return res.status(403).json({ error: 'Not your comic' });
   }
+  if (comic.status === 'quarantined') {
+    return res.status(400).json({
+      error: 'This story is quarantined by the content filter. Fix disallowed language, then re-submit for review.',
+      code: 'CONTENT_FILTER',
+      status: 'quarantined',
+    });
+  }
   if (comic.status !== 'approved') {
     return res.status(400).json({
       error: 'Story must be approved by an editor before publishing. Submit it for review first.',
     });
   }
+
+  // Belt-and-suspenders: re-scan before going public
+  const bundle = loadComicContentBundle(comicId);
+  const scan = scanStoryBundle(bundle || {});
+  if (!scan.ok) {
+    quarantineComic(comicId, 'Auto-quarantine on publish: ' + scan.error);
+    return res.status(400).json({
+      error: scan.error,
+      code: 'CONTENT_FILTER',
+      status: 'quarantined',
+      issues: scan.issues,
+    });
+  }
+
   db.prepare(`UPDATE comics SET status = 'published' WHERE id = ?`).run(comicId);
   res.json({ success: true, status: 'published' });
 });
@@ -2271,6 +2405,15 @@ app.post('/api/comics/:comicId/pages', requireAuth, requireVerified, uploadSingl
       return res.status(403).json({ error: 'Not your comic' });
     }
 
+    const titleCheck = validateContentText(title, { field: 'Page title', maxLen: 200 });
+    if (!titleCheck.ok) {
+      return res.status(400).json({ error: titleCheck.error, code: titleCheck.code });
+    }
+    const textCheck = validateContentText(text_content, { field: 'Page text', maxLen: 50000 });
+    if (!textCheck.ok) {
+      return res.status(400).json({ error: textCheck.error, code: textCheck.code });
+    }
+
     let imagePath = null;
     if (req.file) {
       const filename = generateImageFilename(req.file.originalname);
@@ -2282,7 +2425,13 @@ app.post('/api/comics/:comicId/pages', requireAuth, requireVerified, uploadSingl
     const result = db.prepare(`
       INSERT INTO pages (comic_id, title, image_path, text_content, is_start)
       VALUES (?, ?, ?, ?, ?)
-    `).run(comicId, title, imagePath, text_content, is_start === '1' || is_start === 'true' ? 1 : 0);
+    `).run(
+      comicId,
+      titleCheck.text,
+      imagePath,
+      textCheck.text,
+      is_start === '1' || is_start === 'true' ? 1 : 0
+    );
 
     // If this is marked start, unmark any other starts
     if (is_start === '1' || is_start === 'true') {
@@ -2335,7 +2484,14 @@ app.post('/api/comics/:comicId/pages/bulk', requireAuth, requireVerified, upload
       let baseTitle = file.originalname ? path.parse(file.originalname).name : 'Page';
       baseTitle = String(baseTitle || 'Page').trim() || 'Page';
       const prefix = String(title_prefix || '').trim();
-      const title = prefix ? `${prefix} ${baseTitle}` : baseTitle;
+      let title = prefix ? `${prefix} ${baseTitle}` : baseTitle;
+      const titleCheck = validateContentText(title, { field: 'Page title', maxLen: 200 });
+      if (!titleCheck.ok) {
+        // File names can trip the filter — fall back to a safe generic title
+        title = 'Page';
+      } else {
+        title = titleCheck.text || 'Page';
+      }
 
       const result = db.prepare(`
         INSERT INTO pages (comic_id, title, image_path, text_content, is_start)
@@ -2368,6 +2524,15 @@ app.post('/api/pages/:pageId', requireAuth, requireVerified, uploadSingle('image
     return res.status(403).json({ error: 'Not allowed' });
   }
 
+  const titleCheck = validateContentText(title, { field: 'Page title', maxLen: 200 });
+  if (!titleCheck.ok) {
+    return res.status(400).json({ error: titleCheck.error, code: titleCheck.code });
+  }
+  const textCheck = validateContentText(text_content, { field: 'Page text', maxLen: 50000 });
+  if (!textCheck.ok) {
+    return res.status(400).json({ error: textCheck.error, code: textCheck.code });
+  }
+
   let imagePath = page.image_path;
   if (req.file) {
     const filename = generateImageFilename(req.file.originalname);
@@ -2380,7 +2545,7 @@ app.post('/api/pages/:pageId', requireAuth, requireVerified, uploadSingle('image
     UPDATE pages 
     SET title = ?, image_path = ?, text_content = ?
     WHERE id = ?
-  `).run(title, imagePath, text_content, pageId);
+  `).run(titleCheck.text, imagePath, textCheck.text, pageId);
 
   const updated = db.prepare('SELECT * FROM pages WHERE id = ?').get(pageId);
   res.json(updated);
@@ -2412,6 +2577,14 @@ app.post('/api/pages/:pageId/choices', requireAuth, requireVerified, resolveComi
     return res.status(400).json({ error: 'Target page must be in the same comic' });
   }
 
+  const labelCheck = validateContentText(choice_text, {
+    field: 'Choice label',
+    maxLen: 200,
+  });
+  if (!labelCheck.ok) {
+    return res.status(400).json({ error: labelCheck.error, code: labelCheck.code });
+  }
+
   let choiceImage = null;
   if (req.file) {
     const filename = generateImageFilename(req.file.originalname);
@@ -2423,11 +2596,11 @@ app.post('/api/pages/:pageId/choices', requireAuth, requireVerified, resolveComi
   const result = db.prepare(`
     INSERT INTO choices (from_page_id, choice_text, to_page_id, choice_image)
     VALUES (?, ?, ?, ?)
-  `).run(fromPageId, choice_text, to_page_id, choiceImage);
+  `).run(fromPageId, labelCheck.text, to_page_id, choiceImage);
 
   res.status(201).json({ 
     id: result.lastInsertRowid, 
-    text: choice_text, 
+    text: labelCheck.text, 
     to_page_id: to_page_id,
     image: choiceImage 
   });
@@ -2491,13 +2664,11 @@ app.post('/api/pages/:pageId/set-choices', requireAuth, requireVerified, (req, r
     return res.status(403).json({ error: 'Not allowed' });
   }
 
-  // Clear existing choices for this page
-  db.prepare('DELETE FROM choices WHERE from_page_id = ?').run(fromPageId);
-
   const comicId = fromPage.comic_id;
   const labelList = Array.isArray(labels) ? labels : [];
 
-  const saved = [];
+  // Validate all labels before deleting existing choices
+  const pending = [];
   let slotIndex = 0;
   for (const ch of choices) {
     if (!ch.to_page_id) continue;
@@ -2512,17 +2683,37 @@ app.post('/api/pages/:pageId/set-choices', requireAuth, requireVerified, (req, r
     if (choiceText == null) choiceText = '';
     choiceText = String(choiceText).trim().slice(0, 200);
 
+    const labelCheck = validateContentText(choiceText, {
+      field: `Choice label #${slotIndex + 1}`,
+      maxLen: 200,
+    });
+    if (!labelCheck.ok) {
+      return res.status(400).json({ error: labelCheck.error, code: labelCheck.code });
+    }
+
+    pending.push({
+      to_page_id: ch.to_page_id,
+      choiceText: labelCheck.text,
+      choiceImage,
+    });
+    slotIndex++;
+  }
+
+  // Clear existing choices for this page only after validation passes
+  db.prepare('DELETE FROM choices WHERE from_page_id = ?').run(fromPageId);
+
+  const saved = [];
+  for (const row of pending) {
     db.prepare(`
       INSERT INTO choices (from_page_id, choice_text, to_page_id, choice_image)
       VALUES (?, ?, ?, ?)
-    `).run(fromPageId, choiceText, ch.to_page_id, choiceImage);
+    `).run(fromPageId, row.choiceText, row.to_page_id, row.choiceImage);
 
     saved.push({
-      to_page_id: Number(ch.to_page_id),
-      text: choiceText,
-      image: choiceImage
+      to_page_id: Number(row.to_page_id),
+      text: row.choiceText,
+      image: row.choiceImage
     });
-    slotIndex++;
   }
 
   res.json({ success: true, choices: saved });
@@ -2551,12 +2742,25 @@ app.post('/api/pages/:pageId/choice-labels', requireAuth, requireVerified, (req,
     SELECT id FROM choices WHERE from_page_id = ? ORDER BY id ASC
   `).all(fromPageId);
 
-  const updated = [];
-  existing.forEach((row, i) => {
+  // Validate all labels first so a bad label does not partially update
+  const cleaned = [];
+  for (let i = 0; i < existing.length; i++) {
     const text = String(labels[i] ?? '').trim().slice(0, 200);
-    db.prepare('UPDATE choices SET choice_text = ? WHERE id = ?').run(text, row.id);
-    updated.push({ id: row.id, text });
-  });
+    const labelCheck = validateContentText(text, {
+      field: `Choice label #${i + 1}`,
+      maxLen: 200,
+    });
+    if (!labelCheck.ok) {
+      return res.status(400).json({ error: labelCheck.error, code: labelCheck.code });
+    }
+    cleaned.push({ id: existing[i].id, text: labelCheck.text });
+  }
+
+  const updated = [];
+  for (const row of cleaned) {
+    db.prepare('UPDATE choices SET choice_text = ? WHERE id = ?').run(row.text, row.id);
+    updated.push({ id: row.id, text: row.text });
+  }
 
   res.json({ success: true, choices: updated });
 });

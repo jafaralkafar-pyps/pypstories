@@ -1,7 +1,12 @@
 /**
- * Username + public text moderation for PYPStories.
+ * Username + public text + story content moderation for PYPStories.
  * Custom blocklist: brand/reserved names + common abuse terms.
  * Edit BRAND_RESERVED and PROFANITY arrays to extend — no third-party list required.
+ *
+ * Story pipeline (Stripe Content Creation / family-friendly):
+ *  1. validateContentText on write (title, description, page text, choice labels)
+ *  2. scanStoryBundle on submit/publish (full comic re-scan)
+ *  3. status "quarantined" when submit/publish scan fails
  */
 
 // --- Brand / impersonation / system (always block in usernames; also blocked as whole words in comments) ---
@@ -28,6 +33,9 @@ const PROFANITY = [
   'rape', 'rapist', 'pedophile', 'paedophile', 'pedo', 'molest',
   'killmyself', 'kys', 'suicidal', // crude self-harm bait usernames
   'nazi', 'hitler',
+  // Extra story-content flags (sexual / explicit solicitation)
+  'hentai', 'nsfw', 'xxx', 'nude', 'nudity', 'erotic', 'erotica',
+  'blowjob', 'handjob', 'cumshot', 'deepthroat',
 ];
 
 // Usernames that are only these (or equal after normalize) — empty / generic
@@ -160,9 +168,122 @@ function validatePublicText(raw, { field = 'text', minLen = 2, maxLen = 2000 } =
   return { ok: true };
 }
 
+/**
+ * Story content fields: titles, descriptions, page text, choice labels.
+ * Empty allowed by default (optional captions); set allowEmpty: false for required titles.
+ * Does not block brand names in stories (fantasy "Apple" etc.) — only abuse/profanity list.
+ *
+ * @returns {{ ok: true, text: string } | { ok: false, error: string, code: string }}
+ */
+function validateContentText(raw, {
+  field = 'Text',
+  minLen = 0,
+  maxLen = 50000,
+  allowEmpty = true,
+} = {}) {
+  const body = String(raw ?? '');
+  const trimmed = body.trim();
+
+  if (!trimmed) {
+    if (allowEmpty && minLen <= 0) return { ok: true, text: '' };
+    return { ok: false, error: `${field} is required`, code: 'CONTENT_FILTER' };
+  }
+  if (trimmed.length < minLen) {
+    return { ok: false, error: `${field} is too short`, code: 'CONTENT_FILTER' };
+  }
+  if (body.length > maxLen) {
+    return {
+      ok: false,
+      error: `${field} must be under ${maxLen} characters`,
+      code: 'CONTENT_FILTER',
+    };
+  }
+
+  const norm = normalizeForMatch(body);
+  if (findBlockedInNormalized(norm, [PROFANITY_NORM])) {
+    return {
+      ok: false,
+      error:
+        `${field} contains language that is not allowed on this family-friendly platform. ` +
+        'Please revise (see Content Policy) and try again.',
+      code: 'CONTENT_FILTER',
+    };
+  }
+
+  return { ok: true, text: trimmed };
+}
+
+/**
+ * Full-story scan for submit / publish gates.
+ * @param {{ title?: string, description?: string, pages?: Array, choices?: Array, chapters?: Array }} bundle
+ * @returns {{ ok: true } | { ok: false, error: string, issues: string[], code: string }}
+ */
+function scanStoryBundle({ title, description, pages = [], choices = [], chapters = [] } = {}) {
+  const issues = [];
+
+  const titleCheck = validateContentText(title, {
+    field: 'Story title',
+    allowEmpty: false,
+    minLen: 1,
+    maxLen: 200,
+  });
+  if (!titleCheck.ok) issues.push(titleCheck.error);
+
+  const descCheck = validateContentText(description, {
+    field: 'Story description',
+    maxLen: 5000,
+  });
+  if (!descCheck.ok) issues.push(descCheck.error);
+
+  pages.forEach((p, i) => {
+    const label = (p.title && String(p.title).trim())
+      ? `Page "${String(p.title).trim().slice(0, 40)}"`
+      : `Page #${p.id != null ? p.id : i + 1}`;
+    const pt = validateContentText(p.title, { field: `${label} title`, maxLen: 200 });
+    if (!pt.ok) issues.push(pt.error);
+    const pc = validateContentText(p.text_content, {
+      field: `${label} text`,
+      maxLen: 50000,
+    });
+    if (!pc.ok) issues.push(pc.error);
+  });
+
+  choices.forEach((c, i) => {
+    const text = c.choice_text ?? c.text ?? '';
+    const ct = validateContentText(text, {
+      field: `Choice label #${i + 1}`,
+      maxLen: 200,
+    });
+    if (!ct.ok) issues.push(ct.error);
+  });
+
+  chapters.forEach((ch, i) => {
+    const ct = validateContentText(ch.title, {
+      field: `Chapter title #${i + 1}`,
+      maxLen: 200,
+    });
+    if (!ct.ok) issues.push(ct.error);
+  });
+
+  if (issues.length) {
+    const extra = issues.length > 1
+      ? ` (and ${issues.length - 1} more issue${issues.length > 2 ? 's' : ''})`
+      : '';
+    return {
+      ok: false,
+      issues,
+      error: issues[0] + extra,
+      code: 'CONTENT_FILTER',
+    };
+  }
+  return { ok: true };
+}
+
 module.exports = {
   validateUsername,
   validatePublicText,
+  validateContentText,
+  scanStoryBundle,
   normalizeForMatch,
   // exported for tests / admin tuning later
   BRAND_RESERVED,
