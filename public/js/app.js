@@ -1184,10 +1184,16 @@
       await loadEditor(comicId);
     }
 
-    async function saveComicPrice() {
+    async function saveComicDetails() {
       if (!editingComicId) return;
+      const titleInput = document.getElementById('editor-comic-title');
       const priceInput = document.getElementById('editor-comic-price');
-      if (!priceInput) return;
+      const statusEl = document.getElementById('editor-details-status');
+      if (!titleInput || !priceInput) return;
+
+      const title = titleInput.value.trim();
+      if (!title) return alert('Please enter a story title');
+      if (title.length > 200) return alert('Title must be 200 characters or fewer');
 
       let val = priceInput.value.trim().replace(/^\$/, '');
       // Check standard dollar format: integer or up to 2 decimal places (e.g. 10, 10.5, 10.50)
@@ -1202,21 +1208,35 @@
         const res = await fetch(`/api/comics/${editingComicId}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ price })
+          body: JSON.stringify({ title, price })
         });
         const updated = await res.json();
         if (!res.ok || updated.error) {
-          return alert(updated.error || 'Failed to update price');
+          return alert(updated.error || 'Failed to update story details');
         }
-        // refresh editor display
-        document.getElementById('editor-comic-title').textContent = updated.title + (updated.price ? ` ($${updated.price})` : '');
+        titleInput.value = updated.title || title;
         priceInput.value = updated.price ? parseFloat(updated.price).toFixed(2) : '0.00';
-        // reload for full consistency
+        if (statusEl) {
+          statusEl.textContent = 'Title & price saved.';
+          statusEl.classList.remove('text-slate-500');
+          statusEl.classList.add('text-emerald-400');
+          setTimeout(() => {
+            statusEl.textContent = '0 = Free • ≥$5.99 = full story/bundle • chapters for smaller prices';
+            statusEl.classList.add('text-slate-500');
+            statusEl.classList.remove('text-emerald-400');
+          }, 2500);
+        }
+        // reload for full consistency (lists, etc.)
         await loadEditor(editingComicId);
       } catch (err) {
         console.error(err);
-        alert('Failed to update price');
+        alert('Failed to update story details');
       }
+    }
+
+    /** @deprecated use saveComicDetails — kept for any leftover onclick */
+    async function saveComicPrice() {
+      return saveComicDetails();
     }
 
     function updateEditorCoverPreview(coverUrl) {
@@ -1286,7 +1306,16 @@
       const res = await fetch(`/api/comics/${comicId}`);
       const comic = await res.json();
       
-      document.getElementById('editor-comic-title').textContent = comic.title + (comic.price ? ` ($${comic.price})` : '');
+      const titleInput = document.getElementById('editor-comic-title');
+      if (titleInput) {
+        titleInput.value = comic.title || '';
+        titleInput.onkeydown = (e) => {
+          if (e.key === 'Enter') {
+            e.preventDefault();
+            saveComicDetails();
+          }
+        };
+      }
       document.getElementById('editor-comic-genre').textContent = comic.genre;
       updateEditorCoverPreview(comic.cover_image || null);
       wireEditorCoverUpload(comicId);
@@ -1316,7 +1345,7 @@
         priceInput.onkeydown = (e) => {
           if (e.key === 'Enter') {
             e.preventDefault();
-            saveComicPrice();
+            saveComicDetails();
           }
         };
       }

@@ -594,14 +594,17 @@
         <div class="mb-4 flex-shrink-0">
           <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
             <div class="flex-1 min-w-0">
-              <div id="editor-comic-title" class="font-semibold text-base sm:text-lg"></div>
-              <div id="editor-comic-genre" class="text-xs text-blue-400"></div>
-              <div class="mt-1 flex flex-wrap items-center gap-1 text-xs">
+              <label class="text-[10px] text-slate-500 block mb-0.5">Story title</label>
+              <input id="editor-comic-title" type="text" maxlength="200"
+                     class="w-full max-w-xl font-semibold text-base sm:text-lg bg-slate-950 border border-slate-700 rounded-xl px-3 py-1.5 text-slate-100"
+                     placeholder="Story title">
+              <div id="editor-comic-genre" class="text-xs text-blue-400 mt-1"></div>
+              <div class="mt-2 flex flex-wrap items-center gap-1.5 text-xs">
                 <span class="text-slate-400">Price:</span>
                 <input id="editor-comic-price" type="text" placeholder="0 or 4.99" class="w-16 sm:w-20 bg-slate-800 border border-slate-700 rounded px-1.5 py-0.5 text-xs">
-                <button onclick="saveComicPrice()" class="px-2 py-0.5 bg-blue-600 hover:bg-blue-500 rounded text-xs">Save</button>
+                <button type="button" onclick="saveComicDetails()" class="px-2.5 py-0.5 bg-blue-600 hover:bg-blue-500 rounded text-xs">Save title &amp; price</button>
               </div>
-              <div class="text-[9px] text-slate-500 mt-0.5">0 = Free • ≥$5.99 = full story/bundle • chapters for smaller prices</div>
+              <div id="editor-details-status" class="text-[9px] text-slate-500 mt-0.5">0 = Free • ≥$5.99 = full story/bundle • chapters for smaller prices</div>
             </div>
             <div class="flex flex-wrap gap-2 items-center">
               <button type="button" id="editor-cover-btn"
