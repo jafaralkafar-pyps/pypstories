@@ -218,7 +218,6 @@
     // Navbar + Auth UI
     async function updateAuthUI() {
       const container = document.getElementById('auth-section');
-      const myBtn = document.getElementById('my-comics-btn');
 
       try {
         const res = await fetch('/api/me');
@@ -239,19 +238,17 @@
                 <div class="w-6 h-6 bg-slate-700 rounded-full flex items-center justify-center text-[10px]">${initial}</div>
                 <span class="font-medium">${displayName}${verifiedBadge}</span>
               </div>
-              <button onclick="showMyComics()" class="text-xs px-2 py-1.5 hover:bg-slate-800 rounded-xl border border-slate-700">Stories</button>
+              <button onclick="showMyComics()" class="text-xs px-2 py-1.5 hover:bg-slate-800 rounded-xl border border-slate-700">My Stories</button>
               <button onclick="showAdminReviews()" class="text-xs px-2 py-1.5 hover:bg-slate-800 rounded-xl border border-slate-700 ${(currentUser.role === 'admin' || currentUser.role === 'editor') ? '' : 'hidden'}">Review Queue</button>
               <button onclick="logout()" class="text-xs px-3 py-1.5 hover:bg-slate-800 rounded-xl border border-slate-700">Log out</button>
             </div>
           `;
-          myBtn.classList.remove('hidden');
         } else {
           container.innerHTML = `
             <div class="flex items-center gap-1.5 sm:gap-2">
               <button type="button" onclick="showAuthModal('login')" class="px-2.5 sm:px-4 py-1 sm:py-1.5 text-xs sm:text-sm font-medium border border-slate-600 rounded-2xl hover:bg-slate-900">Log in</button>
               <button type="button" onclick="showAuthModal('register')" class="px-2.5 sm:px-4 py-1 sm:py-1.5 text-xs sm:text-sm font-medium bg-white text-slate-900 rounded-2xl hover:bg-slate-100">Sign up</button>
             </div>`;
-          myBtn.classList.add('hidden');
         }
       } catch (e) {
         container.innerHTML = `
