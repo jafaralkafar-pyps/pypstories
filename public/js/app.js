@@ -235,20 +235,21 @@
           const verifiedBadge = currentUser.email_verified ? '' : ' <span class="text-[10px] text-amber-400">(unverified)</span>';
           const isStaff = currentUser.role === 'admin' || currentUser.role === 'editor';
           const bal = ((currentUser.credit_balance_cents || 0) / 100).toFixed(2);
-          // Desktop: full buttons. Mobile: menu dropdown to avoid header overflow.
+          // Desktop: full buttons. Mobile: menu dropdown.
+          // Use custom .nav-desktop-only / .nav-mobile-only (built CSS lacks md:inline-flex).
           container.innerHTML = `
             <div class="flex items-center gap-1.5 sm:gap-2 justify-end">
-              <button type="button" onclick="showCreditsModal()" class="hidden md:inline-flex text-xs px-2 py-1.5 hover:bg-slate-800 rounded-xl border border-slate-700" title="Credits">$${bal}</button>
-              <div onclick="showAccountModal()" class="hidden md:flex cursor-pointer items-center gap-2 bg-slate-900 hover:bg-slate-800 px-3 py-1 rounded-2xl text-sm">
+              <button type="button" onclick="showCreditsModal()" class="nav-desktop-only text-xs px-2 py-1.5 hover:bg-slate-800 rounded-xl border border-slate-700" title="Credits">$${bal}</button>
+              <div onclick="showAccountModal()" class="nav-desktop-only nav-desktop-flex cursor-pointer items-center gap-2 bg-slate-900 hover:bg-slate-800 px-3 py-1 rounded-2xl text-sm">
                 <div class="w-6 h-6 bg-slate-700 rounded-full flex items-center justify-center text-[10px]">${initial}</div>
                 <span class="font-medium max-w-[8rem] truncate">${displayName}${verifiedBadge}</span>
               </div>
-              <button type="button" onclick="showMyComics()" class="hidden md:inline-flex text-xs px-2 py-1.5 hover:bg-slate-800 rounded-xl border border-slate-700">My Stories</button>
-              <button type="button" onclick="showPurchased()" class="hidden md:inline-flex text-xs px-2 py-1.5 hover:bg-slate-800 rounded-xl border border-slate-700">My Library</button>
-              <button type="button" onclick="showAdminReviews()" class="hidden md:inline-flex text-xs px-2 py-1.5 hover:bg-slate-800 rounded-xl border border-slate-700 ${isStaff ? '' : 'hidden'}">Review Queue</button>
-              <button type="button" onclick="logout()" class="hidden md:inline-flex text-xs px-3 py-1.5 hover:bg-slate-800 rounded-xl border border-slate-700">Log out</button>
+              <button type="button" onclick="showMyComics()" class="nav-desktop-only text-xs px-2 py-1.5 hover:bg-slate-800 rounded-xl border border-slate-700">My Stories</button>
+              <button type="button" onclick="showPurchased()" class="nav-desktop-only text-xs px-2 py-1.5 hover:bg-slate-800 rounded-xl border border-slate-700">My Library</button>
+              <button type="button" onclick="showAdminReviews()" class="nav-desktop-only text-xs px-2 py-1.5 hover:bg-slate-800 rounded-xl border border-slate-700 ${isStaff ? '' : 'hidden'}">Review Queue</button>
+              <button type="button" onclick="logout()" class="nav-desktop-only text-xs px-3 py-1.5 hover:bg-slate-800 rounded-xl border border-slate-700">Log out</button>
 
-              <div id="nav-user-menu" class="relative md:hidden">
+              <div id="nav-user-menu" class="nav-mobile-only relative">
                 <button type="button" id="nav-menu-btn"
                   class="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-2xl border border-slate-600 bg-slate-900 hover:bg-slate-800 text-xs font-medium"
                   aria-expanded="false" aria-haspopup="true" aria-controls="nav-menu-dropdown">
@@ -3270,11 +3271,17 @@
         };
       }
 
-      document.getElementById('comic-info-modal').classList.remove('hidden');
+      const modal = document.getElementById('comic-info-modal');
+      modal.classList.remove('hidden');
+      modal.classList.add('is-open');
+      const scrollEl = document.getElementById('comic-info-scroll');
+      if (scrollEl) scrollEl.scrollTop = 0;
     }
 
     function closeComicInfo() {
-      document.getElementById('comic-info-modal').classList.add('hidden');
+      const modal = document.getElementById('comic-info-modal');
+      modal.classList.add('hidden');
+      modal.classList.remove('is-open');
     }
 
     async function openReader(comicId, options = {}) {

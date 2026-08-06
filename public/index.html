@@ -180,21 +180,15 @@
       #library-tabs .library-tab {
         flex-shrink: 0;
       }
-      /* Story Details: keep modal inside viewport; body scrolls */
-      #comic-info-modal {
-        align-items: flex-end;
-        padding: 0;
-      }
-      #comic-info-panel {
-        max-height: 92dvh;
-        max-height: 92vh;
-        margin-top: 0;
-        border-bottom-left-radius: 0;
-        border-bottom-right-radius: 0;
-      }
-      #comic-info-scroll {
-        -webkit-overflow-scrolling: touch;
-      }
+    }
+
+    /* ——— Nav: desktop full buttons vs mobile menu (no reliance on missing Tailwind utils) ——— */
+    .nav-desktop-only { display: none !important; }
+    .nav-mobile-only { display: block; }
+    @media (min-width: 768px) {
+      .nav-desktop-only { display: inline-flex !important; }
+      .nav-desktop-only.nav-desktop-flex { display: flex !important; }
+      .nav-mobile-only { display: none !important; }
     }
 
     /* Mobile account menu items */
@@ -212,6 +206,63 @@
     .nav-menu-item:hover,
     .nav-menu-item:active {
       background: #1e293b;
+    }
+
+    /* ——— Story Details modal: always fit viewport; body scrolls; actions + header pinned ——— */
+    #comic-info-modal {
+      display: none;
+      position: fixed;
+      inset: 0;
+      z-index: 55;
+      background: rgba(0, 0, 0, 0.9);
+      align-items: center;
+      justify-content: center;
+      padding: 0.75rem;
+      padding-top: max(0.75rem, env(safe-area-inset-top));
+      padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
+      box-sizing: border-box;
+    }
+    #comic-info-modal.is-open {
+      display: flex !important;
+    }
+    #comic-info-panel {
+      width: 100%;
+      max-width: 520px;
+      height: min(88dvh, 680px);
+      max-height: min(88dvh, 680px);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      background: #0f172a;
+      border: 1px solid #334155;
+      border-radius: 1.25rem;
+      box-shadow: 0 25px 50px -12px rgb(0 0 0 / 0.5);
+    }
+    #comic-info-header {
+      flex: 0 0 auto;
+    }
+    #comic-info-scroll {
+      flex: 1 1 auto;
+      min-height: 0;
+      overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
+      overscroll-behavior: contain;
+    }
+    #comic-info-actions {
+      flex: 0 0 auto;
+    }
+    @media (max-width: 640px) {
+      #comic-info-modal {
+        align-items: flex-end;
+        padding: 0;
+        padding-bottom: env(safe-area-inset-bottom, 0);
+      }
+      #comic-info-panel {
+        height: min(90dvh, 100%);
+        max-height: 90dvh;
+        border-radius: 1.25rem 1.25rem 0 0;
+        max-width: 100%;
+      }
     }
   </style>
 </head>
@@ -513,19 +564,17 @@
   </div>
 
   <!-- COMIC INFO / TITLE + DESCRIPTION MODAL (shown first when browsing) -->
-  <div id="comic-info-modal" onclick="if (event.target.id === 'comic-info-modal') closeComicInfo()" 
-       class="hidden fixed inset-0 bg-black/90 z-[55] flex items-end sm:items-center justify-center p-0 sm:p-4">
-    <div id="comic-info-panel" onclick="event.stopImmediatePropagation()" 
-         class="w-full max-w-[520px] max-h-[min(92dvh,720px)] bg-slate-900 rounded-t-3xl sm:rounded-3xl border border-slate-700 overflow-hidden flex flex-col shadow-2xl">
-      <!-- Header (fixed) -->
-      <div class="px-5 sm:px-6 py-3.5 border-b border-slate-800 flex items-center justify-between text-sm flex-shrink-0">
+  <div id="comic-info-modal" onclick="if (event.target.id === 'comic-info-modal') closeComicInfo()">
+    <div id="comic-info-panel" onclick="event.stopImmediatePropagation()">
+      <!-- Header (pinned) -->
+      <div id="comic-info-header" class="px-5 sm:px-6 py-3 border-b border-slate-800 flex items-center justify-between text-sm">
         <div class="text-slate-400">Story Details</div>
         <button type="button" onclick="closeComicInfo()" class="text-slate-400 hover:text-white px-2 py-1">Close</button>
       </div>
 
-      <!-- Scrollable body (title through chapters) -->
-      <div id="comic-info-scroll" class="flex-1 min-h-0 overflow-y-auto overscroll-contain p-4 sm:p-6">
-        <div id="info-title" class="text-2xl font-semibold tracking-tight"></div>
+      <!-- Scrollable body -->
+      <div id="comic-info-scroll" class="p-4 sm:p-5">
+        <div id="info-title" class="text-xl sm:text-2xl font-semibold tracking-tight"></div>
         <div id="info-author" class="mt-1 text-sm"></div>
 
         <div class="flex flex-wrap gap-2 mt-3 text-xs">
@@ -536,13 +585,12 @@
           <div id="info-rating-badge" class="px-2.5 py-0.5 bg-slate-800 rounded-full text-amber-300"></div>
         </div>
 
-        <div class="mt-5">
+        <div class="mt-4">
           <div class="uppercase text-[10px] tracking-[1px] text-slate-500 mb-1.5">Description</div>
-          <div id="info-description" class="text-[15px] text-slate-200 leading-relaxed whitespace-pre-line max-h-[140px] overflow-auto pr-1"></div>
+          <div id="info-description" class="text-[15px] text-slate-200 leading-relaxed whitespace-pre-line max-h-[100px] overflow-auto pr-1"></div>
         </div>
 
-        <!-- Rate this story / chapter -->
-        <div class="mt-5 border border-slate-800 rounded-2xl p-3 bg-slate-950/60">
+        <div class="mt-4 border border-slate-800 rounded-2xl p-3 bg-slate-950/60">
           <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
             <div class="uppercase text-[10px] tracking-[1px] text-slate-500">Your rating</div>
             <select id="info-feedback-target" class="bg-slate-900 border border-slate-700 rounded-xl px-2 py-1 text-xs max-w-[55%]">
@@ -553,8 +601,7 @@
           <div id="info-rating-hint" class="text-[11px] text-slate-500 mt-2">Log in to rate (1–5 stars).</div>
         </div>
 
-        <!-- Comments -->
-        <div class="mt-5">
+        <div class="mt-4">
           <div class="uppercase text-[10px] tracking-[1px] text-slate-500 mb-2">Comments</div>
           <div id="info-comment-form" class="mb-3">
             <textarea id="info-comment-body" rows="2" maxlength="2000"
@@ -563,24 +610,23 @@
             <button type="button" id="info-comment-submit"
               class="mt-2 w-full py-2 rounded-2xl bg-slate-800 hover:bg-slate-700 text-sm font-medium">Post comment</button>
           </div>
-          <div id="info-comments-list" class="space-y-2 max-h-44 overflow-y-auto text-sm"></div>
+          <div id="info-comments-list" class="space-y-2 max-h-36 overflow-y-auto text-sm"></div>
         </div>
 
-        <!-- Chapters (if any) — inside scroll so actions stay visible -->
-        <div id="info-chapters-wrap" class="hidden mt-5">
+        <div id="info-chapters-wrap" class="hidden mt-4">
           <div class="uppercase text-[10px] tracking-[1px] text-slate-500 mb-1.5">Chapters</div>
           <div id="info-chapters-list" class="space-y-1.5"></div>
         </div>
       </div>
 
-      <!-- Action buttons always pinned at bottom -->
-      <div class="p-4 sm:p-5 border-t border-slate-800 bg-slate-950 flex flex-col gap-2.5 flex-shrink-0">
+      <!-- Actions pinned -->
+      <div id="comic-info-actions" class="p-3 sm:p-4 border-t border-slate-800 bg-slate-950 flex flex-col gap-2">
         <button id="info-read-sample-btn"
-                class="w-full py-3 rounded-2xl bg-slate-800 hover:bg-slate-700 active:bg-slate-600 text-sm font-medium transition-colors">
+                class="w-full py-2.5 sm:py-3 rounded-2xl bg-slate-800 hover:bg-slate-700 active:bg-slate-600 text-sm font-medium transition-colors">
           Read Sample (first choice free)
         </button>
         <button id="info-purchase-btn"
-                class="w-full py-3 rounded-2xl bg-white text-slate-900 text-sm font-medium hover:bg-slate-100 active:bg-slate-200 transition-colors">
+                class="w-full py-2.5 sm:py-3 rounded-2xl bg-white text-slate-900 text-sm font-medium hover:bg-slate-100 active:bg-slate-200 transition-colors">
           Purchase
         </button>
         <button type="button" id="info-library-save-btn"
@@ -588,7 +634,7 @@
           Save to My Library
         </button>
         <div id="info-credit-balance" class="hidden text-[11px] text-center text-slate-400"></div>
-        <div id="info-sample-tip" class="text-[10px] text-center text-slate-500 pt-0.5">First choice is free</div>
+        <div id="info-sample-tip" class="text-[10px] text-center text-slate-500">First choice is free</div>
       </div>
     </div>
   </div>
