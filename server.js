@@ -821,6 +821,7 @@ function requireEditor(req, res, next) {
 }
 
 function userHasFullAccess(userId, comicId) {
+  if (userId == null || comicId == null) return false;
   const comic = db.prepare('SELECT user_id, reviewed_by, status FROM comics WHERE id = ?').get(comicId);
   if (!comic) return false;
   if (Number(comic.user_id) === Number(userId)) return true;
@@ -846,6 +847,35 @@ function userHasFullAccess(userId, comicId) {
     `).get(userId, comicId, comicId);
     if (unlocked && unlocked.c >= paidChapters.length) return true;
   }
+  return false;
+}
+
+/** True if user bought full story or any chapter — permanent library license (live edition). */
+function userHasPurchasedAccess(userId, comicId) {
+  if (userId == null || comicId == null) return false;
+  const full = db.prepare(`
+    SELECT 1 FROM purchases WHERE user_id = ? AND comic_id = ?
+  `).get(userId, comicId);
+  if (full) return true;
+  const ch = db.prepare(`
+    SELECT 1 FROM chapter_unlocks WHERE user_id = ? AND comic_id = ? LIMIT 1
+  `).get(userId, comicId);
+  return !!ch;
+}
+
+/**
+ * Can view comic metadata + pages (live edition).
+ * Published for everyone; else owner / reviewer / editor / purchaser (even if unpublished).
+ */
+function userCanViewComic(req, comic) {
+  if (!comic) return false;
+  if (comic.status === 'published') return true;
+  const currentUser = getCurrentUser(req);
+  if (!currentUser) return false;
+  if (sameUserId(currentUser.id, comic.user_id)) return true;
+  if (currentUser.role === 'editor' || currentUser.role === 'admin') return true;
+  if (comic.reviewed_by && sameUserId(currentUser.id, comic.reviewed_by)) return true;
+  if (userHasPurchasedAccess(currentUser.id, comic.id)) return true;
   return false;
 }
 
@@ -1763,13 +1793,14 @@ app.get('/api/comics/:id', (req, res) => {
 
   if (!comic) return res.status(404).json({ error: 'Comic not found' });
 
-  const isOwner = currentUser && currentUser.id === comic.user_id;
-  const isReviewer = currentUser && comic.reviewed_by && Number(comic.reviewed_by) === Number(currentUser.id);
-  const isEditor = currentUser && (currentUser.role === 'editor' || currentUser.role === 'admin');
-
-  if (comic.status !== 'published' && !isOwner && !isReviewer && !isEditor) {
+  if (!userCanViewComic(req, comic)) {
     return res.status(403).json({ error: 'Not available' });
   }
+
+  const isOwner = currentUser && sameUserId(currentUser.id, comic.user_id);
+  const isPurchaser = currentUser && userHasPurchasedAccess(currentUser.id, comic.id);
+  comic.library_access = !!(isOwner || isPurchaser);
+  comic.purchased = !!(currentUser && userHasPurchasedAccess(currentUser.id, comic.id));
 
   // Increment view count only for published public views
   if (comic.status === 'published') {
@@ -1813,12 +1844,10 @@ app.get('/api/comics/:id/feedback', (req, res) => {
   const comic = db.prepare('SELECT id, status, user_id FROM comics WHERE id = ?').get(comicId);
   if (!comic) return res.status(404).json({ error: 'Not found' });
 
-  const currentUser = getCurrentUser(req);
-  const isOwner = currentUser && sameUserId(currentUser.id, comic.user_id);
-  const isEditor = currentUser && (currentUser.role === 'editor' || currentUser.role === 'admin');
-  if (comic.status !== 'published' && !isOwner && !isEditor) {
+  if (!userCanViewComic(req, comic)) {
     return res.status(403).json({ error: 'Not available' });
   }
+  const currentUser = getCurrentUser(req);
 
   let chapterId = parseInt(req.query.chapter_id, 10);
   if (Number.isNaN(chapterId) || chapterId < 0) chapterId = 0;
@@ -1997,6 +2026,75 @@ app.get('/api/comics/:id/purchased', requireAuth, (req, res) => {
     SELECT 1 FROM purchases WHERE user_id = ? AND comic_id = ?
   `).get(userId, comicId);
   res.json({ purchased: !!purchase });
+});
+
+// Purchased library — full-story buys + any chapter unlocks (live edition; works if unpublished)
+app.get('/api/me/library', requireAuth, (req, res) => {
+  const userId = req.session.userId;
+  const rows = db.prepare(`
+    SELECT
+      c.id,
+      c.title,
+      c.description,
+      c.genre,
+      c.cover_image,
+      c.status,
+      c.price_cents,
+      c.view_count,
+      c.created_at,
+      u.username as author,
+      (SELECT COUNT(*) FROM pages WHERE comic_id = c.id) as page_count,
+      CASE WHEN EXISTS (
+        SELECT 1 FROM purchases p WHERE p.user_id = ? AND p.comic_id = c.id
+      ) THEN 1 ELSE 0 END as has_full_purchase,
+      (SELECT COUNT(*) FROM chapter_unlocks cu WHERE cu.user_id = ? AND cu.comic_id = c.id) as chapter_unlock_count,
+      (
+        SELECT MAX(t.acquired_at) FROM (
+          SELECT p.created_at as acquired_at FROM purchases p
+            WHERE p.user_id = ? AND p.comic_id = c.id
+          UNION ALL
+          SELECT cu.created_at as acquired_at FROM chapter_unlocks cu
+            WHERE cu.user_id = ? AND cu.comic_id = c.id
+        ) t
+      ) as acquired_at
+    FROM comics c
+    JOIN users u ON u.id = c.user_id
+    WHERE c.id IN (
+      SELECT comic_id FROM purchases WHERE user_id = ?
+      UNION
+      SELECT comic_id FROM chapter_unlocks WHERE user_id = ?
+    )
+    ORDER BY acquired_at DESC, c.id DESC
+  `).all(userId, userId, userId, userId, userId, userId);
+
+  res.json(rows.map((c) => {
+    let cover = c.cover_image;
+    if (!cover) {
+      const first = db.prepare(`
+        SELECT image_path FROM pages
+        WHERE comic_id = ? AND image_path IS NOT NULL AND image_path != ''
+        ORDER BY id ASC LIMIT 1
+      `).get(c.id);
+      if (first && first.image_path) cover = first.image_path;
+    }
+    const onMarketplace = c.status === 'published';
+    return {
+      id: c.id,
+      title: c.title,
+      description: c.description,
+      genre: c.genre,
+      cover_image: cover,
+      status: c.status,
+      on_marketplace: onMarketplace,
+      price: c.price_cents ? (c.price_cents / 100).toFixed(2) : null,
+      page_count: c.page_count || 0,
+      view_count: c.view_count || 0,
+      author: c.author,
+      access: c.has_full_purchase ? 'full' : 'chapter',
+      chapter_unlock_count: c.chapter_unlock_count || 0,
+      acquired_at: c.acquired_at,
+    };
+  }));
 });
 
 // Get how many sample choices the (logged-in) user has used on this comic (now limited to the first choice)
@@ -2353,14 +2451,9 @@ app.get('/api/comics/:id/pages', (req, res) => {
   const comicId = req.params.id;
   const currentUser = getCurrentUser(req);
 
-  const comic = db.prepare('SELECT user_id, reviewed_by, status FROM comics WHERE id = ?').get(comicId);
-  if (comic) {
-    const isOwner = currentUser && Number(currentUser.id) === Number(comic.user_id);
-    const isReviewer = currentUser && comic.reviewed_by && Number(comic.reviewed_by) === Number(currentUser.id);
-    const isEditor = currentUser && (currentUser.role === 'editor' || currentUser.role === 'admin');
-    if (comic.status !== 'published' && !isOwner && !isReviewer && !isEditor) {
-      return res.status(403).json({ error: 'Not available' });
-    }
+  const comic = db.prepare('SELECT id, user_id, reviewed_by, status FROM comics WHERE id = ?').get(comicId);
+  if (comic && !userCanViewComic(req, comic)) {
+    return res.status(403).json({ error: 'Not available' });
   }
 
   const pages = db.prepare('SELECT * FROM pages WHERE comic_id = ? ORDER BY id ASC').all(comicId);

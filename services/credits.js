@@ -304,8 +304,9 @@ function unlockChapterWithCredits(db, userId, chapterId) {
   `).get(chapterId);
 
   if (!chapter) throw new Error('Chapter not found');
+  // New purchases only while published; owners can always test
   if (chapter.comic_status !== 'published' && Number(chapter.creator_id) !== Number(userId)) {
-    throw new Error('Chapter not available');
+    throw new Error('Chapter not available for purchase');
   }
   if (Number(chapter.creator_id) === Number(userId)) {
     return { free: true, message: 'You own this story' };

@@ -104,7 +104,7 @@
     }
 
     function hideMainViews() {
-      ['view-catalog', 'view-my-comics', 'view-admin-reviews', 'view-account'].forEach(id => {
+      ['view-catalog', 'view-my-comics', 'view-purchased', 'view-admin-reviews', 'view-account'].forEach(id => {
         const el = document.getElementById(id);
         if (el) el.classList.add('hidden');
       });
@@ -120,6 +120,8 @@
         previousView = catalogMode;
       } else if (!document.getElementById('view-my-comics')?.classList.contains('hidden')) {
         previousView = 'my-comics';
+      } else if (!document.getElementById('view-purchased')?.classList.contains('hidden')) {
+        previousView = 'purchased';
       } else if (!document.getElementById('view-admin-reviews')?.classList.contains('hidden')) {
         previousView = 'admin-reviews';
       } else if (!document.getElementById('view-account')?.classList.contains('hidden')) {
@@ -140,6 +142,8 @@
       }
       if (previousView === 'my-comics') {
         showMyComics();
+      } else if (previousView === 'purchased') {
+        showPurchased();
       } else if (previousView === 'admin-reviews') {
         showAdminReviews();
       } else if (previousView === 'account') {
@@ -239,6 +243,7 @@
                 <span class="font-medium">${displayName}${verifiedBadge}</span>
               </div>
               <button onclick="showMyComics()" class="text-xs px-2 py-1.5 hover:bg-slate-800 rounded-xl border border-slate-700">My Stories</button>
+              <button onclick="showPurchased()" class="text-xs px-2 py-1.5 hover:bg-slate-800 rounded-xl border border-slate-700">Purchased</button>
               <button onclick="showAdminReviews()" class="text-xs px-2 py-1.5 hover:bg-slate-800 rounded-xl border border-slate-700 ${(currentUser.role === 'admin' || currentUser.role === 'editor') ? '' : 'hidden'}">Review Queue</button>
               <button onclick="logout()" class="text-xs px-3 py-1.5 hover:bg-slate-800 rounded-xl border border-slate-700">Log out</button>
             </div>
@@ -918,6 +923,85 @@
         `;
         div.dataset.comicId = comic.id;
         grid.appendChild(div);
+      });
+    }
+
+    async function showPurchased() {
+      if (!currentUser) {
+        showAuthModal();
+        return;
+      }
+
+      await closeStructureBuilder({ save: true });
+      document.getElementById('reader-modal').classList.add('hidden');
+      document.getElementById('create-modal').classList.add('hidden');
+      document.getElementById('navbar').classList.remove('hidden');
+      hideMainViews();
+      document.getElementById('view-purchased').classList.remove('hidden');
+
+      const grid = document.getElementById('purchased-grid');
+      const empty = document.getElementById('purchased-empty');
+      grid.innerHTML = '';
+
+      let items = [];
+      try {
+        const res = await fetch('/api/me/library');
+        if (!res.ok) {
+          empty.classList.remove('hidden');
+          empty.textContent = 'Could not load your library. Try again.';
+          return;
+        }
+        items = await res.json();
+      } catch (e) {
+        empty.classList.remove('hidden');
+        empty.textContent = 'Could not load your library. Try again.';
+        return;
+      }
+
+      if (!items.length) {
+        empty.classList.remove('hidden');
+        empty.textContent = "You haven't purchased any stories yet. Browse the catalog to find one.";
+        return;
+      }
+      empty.classList.add('hidden');
+
+      items.forEach((comic) => {
+        const div = document.createElement('div');
+        div.className = 'comic-card bg-slate-900 border border-slate-800 rounded-3xl p-4 sm:p-5 cursor-pointer overflow-hidden';
+        const accessLabel = comic.access === 'full' ? 'Full story' : `Chapter access (${comic.chapter_unlock_count || 1})`;
+        const marketNote = comic.on_marketplace
+          ? '<span class="text-emerald-400/90">On Browse</span>'
+          : '<span class="text-amber-400/90">Removed from Browse — still in your library</span>';
+        const cover = comic.cover_image
+          ? `<div class="mb-3 rounded-2xl overflow-hidden bg-slate-950 aspect-[3/2]"><img src="${escapeHtml(comic.cover_image)}" alt="" class="w-full h-full object-cover"></div>`
+          : '';
+        div.innerHTML = `
+          ${cover}
+          <div class="font-semibold text-xl">${escapeHtml(comic.title || 'Untitled')}</div>
+          <div class="text-sm text-slate-400 mt-0.5">by ${escapeHtml(comic.author || 'Unknown')} · ${comic.page_count || 0} pages</div>
+          <div class="mt-1 text-xs text-slate-500">${accessLabel} · ${marketNote}</div>
+          <div class="mt-5 flex gap-2 text-sm">
+            <button type="button" class="flex-1 py-2 bg-blue-600 hover:bg-blue-500 rounded-2xl text-xs sm:text-sm text-white" data-action="read">Read</button>
+            <button type="button" class="flex-1 py-2 border border-slate-700 hover:bg-slate-800 rounded-2xl text-xs sm:text-sm" data-action="info">Details</button>
+          </div>
+        `;
+        div.dataset.comicId = comic.id;
+        grid.appendChild(div);
+      });
+
+      grid.querySelectorAll('.comic-card').forEach((card) => {
+        card.addEventListener('click', (e) => {
+          const id = parseInt(card.dataset.comicId, 10);
+          if (!id) return;
+          const btn = e.target.closest('button[data-action]');
+          if (btn && btn.dataset.action === 'info') {
+            e.stopPropagation();
+            showComicInfo(id);
+            return;
+          }
+          // default / Read → open reader (live edition)
+          openReader(id);
+        });
       });
     }
 
@@ -3680,6 +3764,7 @@
     window.showHome = showHome;
     window.showBrowse = showBrowse;
     window.showMyComics = showMyComics;
+    window.showPurchased = showPurchased;
     window.showCreditsModal = showCreditsModal;
     window.closeCreditsModal = closeCreditsModal;
     window.showAccountModal = showAccountModal;
