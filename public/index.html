@@ -170,6 +170,33 @@
       #reader-modal, #create-modal {
         top: 3.5rem !important;
       }
+      /* Library filter tabs scroll on narrow screens */
+      #library-tabs {
+        flex-wrap: nowrap;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        padding-bottom: 0.25rem;
+      }
+      #library-tabs .library-tab {
+        flex-shrink: 0;
+      }
+    }
+
+    /* Mobile account menu items */
+    .nav-menu-item {
+      display: block;
+      width: 100%;
+      text-align: left;
+      padding: 0.65rem 0.85rem;
+      font-size: 0.8125rem;
+      color: #e2e8f0;
+      background: transparent;
+      border: 0;
+      cursor: pointer;
+    }
+    .nav-menu-item:hover,
+    .nav-menu-item:active {
+      background: #1e293b;
     }
   </style>
 </head>

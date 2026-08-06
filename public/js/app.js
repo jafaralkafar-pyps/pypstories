@@ -233,21 +233,44 @@
           const emailOrName = currentUser.username || currentUser.email || 'User';
           const initial = (emailOrName)[0].toUpperCase();
           const verifiedBadge = currentUser.email_verified ? '' : ' <span class="text-[10px] text-amber-400">(unverified)</span>';
-          
+          const isStaff = currentUser.role === 'admin' || currentUser.role === 'editor';
           const bal = ((currentUser.credit_balance_cents || 0) / 100).toFixed(2);
+          // Desktop: full buttons. Mobile: menu dropdown to avoid header overflow.
           container.innerHTML = `
-            <div class="flex items-center gap-2 flex-wrap justify-end">
-              <button onclick="showCreditsModal()" class="text-xs px-2 py-1.5 hover:bg-slate-800 rounded-xl border border-slate-700" title="Credits">$${bal}</button>
-              <div onclick="showAccountModal()" class="cursor-pointer flex items-center gap-2 bg-slate-900 hover:bg-slate-800 px-3 py-1 rounded-2xl text-sm">
+            <div class="flex items-center gap-1.5 sm:gap-2 justify-end">
+              <button type="button" onclick="showCreditsModal()" class="hidden md:inline-flex text-xs px-2 py-1.5 hover:bg-slate-800 rounded-xl border border-slate-700" title="Credits">$${bal}</button>
+              <div onclick="showAccountModal()" class="hidden md:flex cursor-pointer items-center gap-2 bg-slate-900 hover:bg-slate-800 px-3 py-1 rounded-2xl text-sm">
                 <div class="w-6 h-6 bg-slate-700 rounded-full flex items-center justify-center text-[10px]">${initial}</div>
-                <span class="font-medium">${displayName}${verifiedBadge}</span>
+                <span class="font-medium max-w-[8rem] truncate">${displayName}${verifiedBadge}</span>
               </div>
-              <button onclick="showMyComics()" class="text-xs px-2 py-1.5 hover:bg-slate-800 rounded-xl border border-slate-700">My Stories</button>
-              <button onclick="showPurchased()" class="text-xs px-2 py-1.5 hover:bg-slate-800 rounded-xl border border-slate-700">My Library</button>
-              <button onclick="showAdminReviews()" class="text-xs px-2 py-1.5 hover:bg-slate-800 rounded-xl border border-slate-700 ${(currentUser.role === 'admin' || currentUser.role === 'editor') ? '' : 'hidden'}">Review Queue</button>
-              <button onclick="logout()" class="text-xs px-3 py-1.5 hover:bg-slate-800 rounded-xl border border-slate-700">Log out</button>
+              <button type="button" onclick="showMyComics()" class="hidden md:inline-flex text-xs px-2 py-1.5 hover:bg-slate-800 rounded-xl border border-slate-700">My Stories</button>
+              <button type="button" onclick="showPurchased()" class="hidden md:inline-flex text-xs px-2 py-1.5 hover:bg-slate-800 rounded-xl border border-slate-700">My Library</button>
+              <button type="button" onclick="showAdminReviews()" class="hidden md:inline-flex text-xs px-2 py-1.5 hover:bg-slate-800 rounded-xl border border-slate-700 ${isStaff ? '' : 'hidden'}">Review Queue</button>
+              <button type="button" onclick="logout()" class="hidden md:inline-flex text-xs px-3 py-1.5 hover:bg-slate-800 rounded-xl border border-slate-700">Log out</button>
+
+              <div id="nav-user-menu" class="relative md:hidden">
+                <button type="button" id="nav-menu-btn"
+                  class="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-2xl border border-slate-600 bg-slate-900 hover:bg-slate-800 text-xs font-medium"
+                  aria-expanded="false" aria-haspopup="true" aria-controls="nav-menu-dropdown">
+                  <span class="w-6 h-6 bg-slate-700 rounded-full flex items-center justify-center text-[10px] flex-shrink-0">${initial}</span>
+                  <span class="max-w-[5.5rem] truncate">${displayName}</span>
+                  <svg class="w-3.5 h-3.5 text-slate-400 flex-shrink-0" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.17l3.71-3.94a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd"/></svg>
+                </button>
+                <div id="nav-menu-dropdown"
+                  class="hidden absolute right-0 top-full mt-1.5 w-52 py-1.5 rounded-2xl border border-slate-700 bg-slate-900 shadow-xl z-[60]">
+                  <div class="px-3 py-2 border-b border-slate-800 text-[11px] text-slate-500">Credits: $${bal}</div>
+                  <button type="button" class="nav-menu-item" data-nav-action="credits">Add / manage credits</button>
+                  <button type="button" class="nav-menu-item" data-nav-action="account">Account</button>
+                  <button type="button" class="nav-menu-item" data-nav-action="stories">My Stories</button>
+                  <button type="button" class="nav-menu-item" data-nav-action="library">My Library</button>
+                  ${isStaff ? '<button type="button" class="nav-menu-item" data-nav-action="review">Review Queue</button>' : ''}
+                  <div class="my-1 border-t border-slate-800"></div>
+                  <button type="button" class="nav-menu-item text-red-300" data-nav-action="logout">Log out</button>
+                </div>
+              </div>
             </div>
           `;
+          wireNavUserMenu();
         } else {
           container.innerHTML = `
             <div class="flex items-center gap-1.5 sm:gap-2">
@@ -261,6 +284,51 @@
             <button type="button" onclick="showAuthModal('login')" class="px-2.5 sm:px-4 py-1 sm:py-1.5 text-xs sm:text-sm font-medium border border-slate-600 rounded-2xl hover:bg-slate-900">Log in</button>
             <button type="button" onclick="showAuthModal('register')" class="px-2.5 sm:px-4 py-1 sm:py-1.5 text-xs sm:text-sm font-medium bg-white text-slate-900 rounded-2xl hover:bg-slate-100">Sign up</button>
           </div>`;
+      }
+    }
+
+    function closeNavUserMenu() {
+      const dd = document.getElementById('nav-menu-dropdown');
+      const btn = document.getElementById('nav-menu-btn');
+      if (dd) dd.classList.add('hidden');
+      if (btn) btn.setAttribute('aria-expanded', 'false');
+    }
+
+    function wireNavUserMenu() {
+      const root = document.getElementById('nav-user-menu');
+      const btn = document.getElementById('nav-menu-btn');
+      const dd = document.getElementById('nav-menu-dropdown');
+      if (!root || !btn || !dd) return;
+
+      btn.onclick = (e) => {
+        e.stopPropagation();
+        const open = dd.classList.toggle('hidden') === false;
+        btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+      };
+
+      dd.querySelectorAll('[data-nav-action]').forEach((item) => {
+        item.onclick = (e) => {
+          e.stopPropagation();
+          const action = item.dataset.navAction;
+          closeNavUserMenu();
+          if (action === 'credits') showCreditsModal();
+          else if (action === 'account') showAccountModal();
+          else if (action === 'stories') showMyComics();
+          else if (action === 'library') showPurchased();
+          else if (action === 'review') showAdminReviews();
+          else if (action === 'logout') logout();
+        };
+      });
+
+      if (!document.body.dataset.navMenuOutside) {
+        document.body.dataset.navMenuOutside = '1';
+        document.addEventListener('click', (e) => {
+          const menu = document.getElementById('nav-user-menu');
+          if (menu && !menu.contains(e.target)) closeNavUserMenu();
+        });
+        document.addEventListener('keydown', (e) => {
+          if (e.key === 'Escape') closeNavUserMenu();
+        });
       }
     }
 
@@ -3048,10 +3116,10 @@
             }
           } catch (e) {}
           const paintSave = () => {
-            saveBtn.textContent = saved ? 'Remove from My Library' : 'Save to My Library';
+            saveBtn.textContent = saved ? '✓ Saved — tap to remove' : '☆ Save free story to My Library';
             saveBtn.className = saved
               ? 'w-full py-2.5 rounded-2xl border border-slate-600 bg-slate-800/80 hover:bg-slate-800 text-sm font-medium transition-colors'
-              : 'w-full py-2.5 rounded-2xl border border-blue-700/60 text-blue-200 hover:bg-blue-950/40 text-sm font-medium transition-colors';
+              : 'w-full py-2.5 rounded-2xl border border-blue-600 bg-blue-950/50 hover:bg-blue-900/40 text-blue-100 text-sm font-medium transition-colors';
           };
           paintSave();
           saveBtn.onclick = async () => {
