@@ -377,12 +377,16 @@
       </div>
     </div>
 
-    <!-- PURCHASED LIBRARY -->
+    <!-- MY LIBRARY -->
     <div id="view-purchased" class="hidden max-w-6xl mx-auto px-4 sm:px-6 py-8 sm:py-10">
-      <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6 sm:mb-8">
-        <div>
-          <h2 class="text-2xl sm:text-3xl md:text-4xl font-semibold tracking-tighter">Purchased</h2>
-          <p class="text-slate-400 text-sm sm:text-base">Stories and chapters you bought — yours to read anytime (live edition, even if off Browse)</p>
+      <div class="mb-6 sm:mb-8">
+        <h2 class="text-2xl sm:text-3xl md:text-4xl font-semibold tracking-tighter">My Library</h2>
+        <p class="text-slate-400 text-sm sm:text-base mt-1">Purchased, saved free stories, and what you've read — live edition, even if off Browse</p>
+        <div id="library-tabs" class="mt-4 flex flex-wrap gap-2 text-xs sm:text-sm">
+          <button type="button" data-library-filter="all" class="library-tab px-3 py-1.5 rounded-2xl border border-blue-500 bg-blue-600/20 text-blue-200">All</button>
+          <button type="button" data-library-filter="purchased" class="library-tab px-3 py-1.5 rounded-2xl border border-slate-700 text-slate-300 hover:bg-slate-900">Purchased</button>
+          <button type="button" data-library-filter="saved" class="library-tab px-3 py-1.5 rounded-2xl border border-slate-700 text-slate-300 hover:bg-slate-900">Saved</button>
+          <button type="button" data-library-filter="read" class="library-tab px-3 py-1.5 rounded-2xl border border-slate-700 text-slate-300 hover:bg-slate-900">Previously Read</button>
         </div>
       </div>
 
@@ -391,7 +395,7 @@
       </div>
 
       <div id="purchased-empty" class="hidden text-center py-12 text-slate-400 border border-slate-800 rounded-3xl">
-        You haven't purchased any stories yet. Browse the catalog to find one.
+        Nothing here yet.
       </div>
     </div>
 
@@ -535,6 +539,10 @@
         <button id="info-purchase-btn"
                 class="w-full py-3 rounded-2xl bg-white text-slate-900 text-sm font-medium hover:bg-slate-100 active:bg-slate-200 transition-colors">
           Purchase
+        </button>
+        <button type="button" id="info-library-save-btn"
+                class="hidden w-full py-2.5 rounded-2xl border border-slate-600 hover:bg-slate-800 text-sm font-medium transition-colors">
+          Save to My Library
         </button>
         <div id="info-credit-balance" class="hidden text-[11px] text-center text-slate-400"></div>
         <div id="info-sample-tip" class="text-[10px] text-center text-slate-500 pt-1">First choice is free</div>

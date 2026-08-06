@@ -211,6 +211,26 @@ db.exec(`
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
     FOREIGN KEY (comic_id) REFERENCES comics(id) ON DELETE CASCADE
   );
+
+  -- Free (or any) stories explicitly saved to My Library
+  CREATE TABLE IF NOT EXISTS library_saves (
+    user_id INTEGER NOT NULL,
+    comic_id INTEGER NOT NULL,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (user_id, comic_id),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (comic_id) REFERENCES comics(id) ON DELETE CASCADE
+  );
+
+  -- Stories the user has opened in the reader
+  CREATE TABLE IF NOT EXISTS reading_history (
+    user_id INTEGER NOT NULL,
+    comic_id INTEGER NOT NULL,
+    last_read_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (user_id, comic_id),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (comic_id) REFERENCES comics(id) ON DELETE CASCADE
+  );
 `);
 
 // Migrate old schema if needed (add email columns)
@@ -276,6 +296,30 @@ try {
 // purchases: live DBs use purchased_at (not created_at)
 try {
   db.exec(`ALTER TABLE purchases ADD COLUMN purchased_at TEXT DEFAULT CURRENT_TIMESTAMP`);
+} catch (e) {}
+try {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS library_saves (
+      user_id INTEGER NOT NULL,
+      comic_id INTEGER NOT NULL,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (user_id, comic_id),
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY (comic_id) REFERENCES comics(id) ON DELETE CASCADE
+    )
+  `);
+} catch (e) {}
+try {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS reading_history (
+      user_id INTEGER NOT NULL,
+      comic_id INTEGER NOT NULL,
+      last_read_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (user_id, comic_id),
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY (comic_id) REFERENCES comics(id) ON DELETE CASCADE
+    )
+  `);
 } catch (e) {}
 
 // Pages / choices columns added after first production DBs were created
@@ -867,9 +911,16 @@ function userHasPurchasedAccess(userId, comicId) {
   return !!ch;
 }
 
+function userHasLibrarySave(userId, comicId) {
+  if (userId == null || comicId == null) return false;
+  return !!db.prepare(`
+    SELECT 1 FROM library_saves WHERE user_id = ? AND comic_id = ?
+  `).get(userId, comicId);
+}
+
 /**
  * Can view comic metadata + pages (live edition).
- * Published for everyone; else owner / reviewer / editor / purchaser (even if unpublished).
+ * Published for everyone; else owner / reviewer / editor / purchaser / saved (even if unpublished).
  */
 function userCanViewComic(req, comic) {
   if (!comic) return false;
@@ -880,7 +931,17 @@ function userCanViewComic(req, comic) {
   if (currentUser.role === 'editor' || currentUser.role === 'admin') return true;
   if (comic.reviewed_by && sameUserId(currentUser.id, comic.reviewed_by)) return true;
   if (userHasPurchasedAccess(currentUser.id, comic.id)) return true;
+  if (userHasLibrarySave(currentUser.id, comic.id)) return true;
   return false;
+}
+
+function recordReadingHistory(userId, comicId) {
+  if (userId == null || comicId == null) return;
+  db.prepare(`
+    INSERT INTO reading_history (user_id, comic_id, last_read_at)
+    VALUES (?, ?, datetime('now'))
+    ON CONFLICT(user_id, comic_id) DO UPDATE SET last_read_at = datetime('now')
+  `).run(userId, comicId);
 }
 
 // === AUTH ROUTES ===
@@ -2032,9 +2093,42 @@ app.get('/api/comics/:id/purchased', requireAuth, (req, res) => {
   res.json({ purchased: !!purchase });
 });
 
-// Purchased library — full-story buys + any chapter unlocks (live edition; works if unpublished)
+// My Library — purchased + saved free + previously read (filter via ?filter=)
+// filter: all | purchased | saved | read
 app.get('/api/me/library', requireAuth, (req, res) => {
   const userId = req.session.userId;
+  const filter = String(req.query.filter || 'all').toLowerCase();
+  const allowed = new Set(['all', 'purchased', 'saved', 'read']);
+  const mode = allowed.has(filter) ? filter : 'all';
+
+  let idSql;
+  if (mode === 'purchased') {
+    idSql = `
+      SELECT comic_id FROM purchases WHERE user_id = ?
+      UNION
+      SELECT comic_id FROM chapter_unlocks WHERE user_id = ?
+    `;
+  } else if (mode === 'saved') {
+    idSql = `SELECT comic_id FROM library_saves WHERE user_id = ?`;
+  } else if (mode === 'read') {
+    idSql = `SELECT comic_id FROM reading_history WHERE user_id = ?`;
+  } else {
+    idSql = `
+      SELECT comic_id FROM purchases WHERE user_id = ?
+      UNION
+      SELECT comic_id FROM chapter_unlocks WHERE user_id = ?
+      UNION
+      SELECT comic_id FROM library_saves WHERE user_id = ?
+      UNION
+      SELECT comic_id FROM reading_history WHERE user_id = ?
+    `;
+  }
+
+  const idParams =
+    mode === 'purchased' ? [userId, userId]
+    : mode === 'all' ? [userId, userId, userId, userId]
+    : [userId];
+
   const rows = db.prepare(`
     SELECT
       c.id,
@@ -2052,6 +2146,13 @@ app.get('/api/me/library', requireAuth, (req, res) => {
         SELECT 1 FROM purchases p WHERE p.user_id = ? AND p.comic_id = c.id
       ) THEN 1 ELSE 0 END as has_full_purchase,
       (SELECT COUNT(*) FROM chapter_unlocks cu WHERE cu.user_id = ? AND cu.comic_id = c.id) as chapter_unlock_count,
+      CASE WHEN EXISTS (
+        SELECT 1 FROM library_saves ls WHERE ls.user_id = ? AND ls.comic_id = c.id
+      ) THEN 1 ELSE 0 END as is_saved,
+      CASE WHEN EXISTS (
+        SELECT 1 FROM reading_history rh WHERE rh.user_id = ? AND rh.comic_id = c.id
+      ) THEN 1 ELSE 0 END as is_read,
+      (SELECT rh.last_read_at FROM reading_history rh WHERE rh.user_id = ? AND rh.comic_id = c.id) as last_read_at,
       (
         SELECT MAX(t.acquired_at) FROM (
           SELECT p.purchased_at as acquired_at FROM purchases p
@@ -2059,46 +2160,129 @@ app.get('/api/me/library', requireAuth, (req, res) => {
           UNION ALL
           SELECT cu.created_at as acquired_at FROM chapter_unlocks cu
             WHERE cu.user_id = ? AND cu.comic_id = c.id
+          UNION ALL
+          SELECT ls.created_at as acquired_at FROM library_saves ls
+            WHERE ls.user_id = ? AND ls.comic_id = c.id
+          UNION ALL
+          SELECT rh.last_read_at as acquired_at FROM reading_history rh
+            WHERE rh.user_id = ? AND rh.comic_id = c.id
         ) t
-      ) as acquired_at
+      ) as sort_at
     FROM comics c
     JOIN users u ON u.id = c.user_id
-    WHERE c.id IN (
-      SELECT comic_id FROM purchases WHERE user_id = ?
-      UNION
-      SELECT comic_id FROM chapter_unlocks WHERE user_id = ?
-    )
-    ORDER BY acquired_at DESC, c.id DESC
-  `).all(userId, userId, userId, userId, userId, userId);
+    WHERE c.id IN (${idSql})
+    ORDER BY sort_at DESC, c.id DESC
+  `).all(userId, userId, userId, userId, userId, userId, userId, userId, userId, ...idParams);
 
-  res.json(rows.map((c) => {
-    let cover = c.cover_image;
-    if (!cover) {
-      const first = db.prepare(`
-        SELECT image_path FROM pages
-        WHERE comic_id = ? AND image_path IS NOT NULL AND image_path != ''
-        ORDER BY id ASC LIMIT 1
-      `).get(c.id);
-      if (first && first.image_path) cover = first.image_path;
-    }
-    const onMarketplace = c.status === 'published';
-    return {
-      id: c.id,
-      title: c.title,
-      description: c.description,
-      genre: c.genre,
-      cover_image: cover,
-      status: c.status,
-      on_marketplace: onMarketplace,
-      price: c.price_cents ? (c.price_cents / 100).toFixed(2) : null,
-      page_count: c.page_count || 0,
-      view_count: c.view_count || 0,
-      author: c.author,
-      access: c.has_full_purchase ? 'full' : 'chapter',
-      chapter_unlock_count: c.chapter_unlock_count || 0,
-      acquired_at: c.acquired_at,
-    };
-  }));
+  const counts = {
+    all: db.prepare(`
+      SELECT COUNT(*) as n FROM (
+        SELECT comic_id FROM purchases WHERE user_id = ?
+        UNION
+        SELECT comic_id FROM chapter_unlocks WHERE user_id = ?
+        UNION
+        SELECT comic_id FROM library_saves WHERE user_id = ?
+        UNION
+        SELECT comic_id FROM reading_history WHERE user_id = ?
+      )
+    `).get(userId, userId, userId, userId).n,
+    purchased: db.prepare(`
+      SELECT COUNT(*) as n FROM (
+        SELECT comic_id FROM purchases WHERE user_id = ?
+        UNION
+        SELECT comic_id FROM chapter_unlocks WHERE user_id = ?
+      )
+    `).get(userId, userId).n,
+    saved: db.prepare(`SELECT COUNT(*) as n FROM library_saves WHERE user_id = ?`).get(userId).n,
+    read: db.prepare(`SELECT COUNT(*) as n FROM reading_history WHERE user_id = ?`).get(userId).n,
+  };
+
+  res.json({
+    filter: mode,
+    counts,
+    items: rows.map((c) => {
+      let cover = c.cover_image;
+      if (!cover) {
+        const first = db.prepare(`
+          SELECT image_path FROM pages
+          WHERE comic_id = ? AND image_path IS NOT NULL AND image_path != ''
+          ORDER BY id ASC LIMIT 1
+        `).get(c.id);
+        if (first && first.image_path) cover = first.image_path;
+      }
+      const purchased = !!(c.has_full_purchase || c.chapter_unlock_count > 0);
+      return {
+        id: c.id,
+        title: c.title,
+        description: c.description,
+        genre: c.genre,
+        cover_image: cover,
+        status: c.status,
+        on_marketplace: c.status === 'published',
+        price: c.price_cents ? (c.price_cents / 100).toFixed(2) : null,
+        page_count: c.page_count || 0,
+        view_count: c.view_count || 0,
+        author: c.author,
+        purchased,
+        access: c.has_full_purchase ? 'full' : (c.chapter_unlock_count > 0 ? 'chapter' : null),
+        chapter_unlock_count: c.chapter_unlock_count || 0,
+        saved: !!c.is_saved,
+        previously_read: !!c.is_read,
+        last_read_at: c.last_read_at,
+        sort_at: c.sort_at,
+      };
+    }),
+  });
+});
+
+// Save a free (or any accessible) published story to My Library
+app.post('/api/me/library/save/:comicId', requireAuth, (req, res) => {
+  const userId = req.session.userId;
+  const comicId = parseInt(req.params.comicId, 10);
+  const comic = db.prepare('SELECT id, status, price_cents, user_id FROM comics WHERE id = ?').get(comicId);
+  if (!comic) return res.status(404).json({ error: 'Story not found' });
+  if (comic.status !== 'published' && !userCanViewComic(req, comic)) {
+    return res.status(403).json({ error: 'Story not available' });
+  }
+  // Prefer free saves; still allow save if already purchased (no-op useful for UX)
+  db.prepare(`
+    INSERT OR IGNORE INTO library_saves (user_id, comic_id, created_at)
+    VALUES (?, ?, datetime('now'))
+  `).run(userId, comicId);
+  res.json({ success: true, saved: true });
+});
+
+app.delete('/api/me/library/save/:comicId', requireAuth, (req, res) => {
+  const userId = req.session.userId;
+  const comicId = parseInt(req.params.comicId, 10);
+  db.prepare(`DELETE FROM library_saves WHERE user_id = ? AND comic_id = ?`).run(userId, comicId);
+  res.json({ success: true, saved: false });
+});
+
+// Record that the user opened this story in the reader (Previously Read)
+app.post('/api/me/library/read/:comicId', requireAuth, (req, res) => {
+  const userId = req.session.userId;
+  const comicId = parseInt(req.params.comicId, 10);
+  const comic = db.prepare('SELECT id, user_id, reviewed_by, status FROM comics WHERE id = ?').get(comicId);
+  if (!comic) return res.status(404).json({ error: 'Story not found' });
+  if (!userCanViewComic(req, comic)) {
+    return res.status(403).json({ error: 'Not available' });
+  }
+  recordReadingHistory(userId, comicId);
+  res.json({ success: true });
+});
+
+// Library status for a single comic (for info modal Save button)
+app.get('/api/me/library/status/:comicId', requireAuth, (req, res) => {
+  const userId = req.session.userId;
+  const comicId = parseInt(req.params.comicId, 10);
+  res.json({
+    purchased: userHasPurchasedAccess(userId, comicId),
+    saved: userHasLibrarySave(userId, comicId),
+    previously_read: !!db.prepare(`
+      SELECT 1 FROM reading_history WHERE user_id = ? AND comic_id = ?
+    `).get(userId, comicId),
+  });
 });
 
 // Get how many sample choices the (logged-in) user has used on this comic (now limited to the first choice)

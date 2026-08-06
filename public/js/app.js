@@ -243,7 +243,7 @@
                 <span class="font-medium">${displayName}${verifiedBadge}</span>
               </div>
               <button onclick="showMyComics()" class="text-xs px-2 py-1.5 hover:bg-slate-800 rounded-xl border border-slate-700">My Stories</button>
-              <button onclick="showPurchased()" class="text-xs px-2 py-1.5 hover:bg-slate-800 rounded-xl border border-slate-700">Purchased</button>
+              <button onclick="showPurchased()" class="text-xs px-2 py-1.5 hover:bg-slate-800 rounded-xl border border-slate-700">My Library</button>
               <button onclick="showAdminReviews()" class="text-xs px-2 py-1.5 hover:bg-slate-800 rounded-xl border border-slate-700 ${(currentUser.role === 'admin' || currentUser.role === 'editor') ? '' : 'hidden'}">Review Queue</button>
               <button onclick="logout()" class="text-xs px-3 py-1.5 hover:bg-slate-800 rounded-xl border border-slate-700">Log out</button>
             </div>
@@ -926,11 +926,25 @@
       });
     }
 
-    async function showPurchased() {
+    let libraryFilter = 'all';
+
+    function setLibraryTabStyles() {
+      document.querySelectorAll('.library-tab').forEach((btn) => {
+        const active = btn.dataset.libraryFilter === libraryFilter;
+        btn.className = 'library-tab px-3 py-1.5 rounded-2xl border text-xs sm:text-sm ' + (
+          active
+            ? 'border-blue-500 bg-blue-600/20 text-blue-200'
+            : 'border-slate-700 text-slate-300 hover:bg-slate-900'
+        );
+      });
+    }
+
+    async function showPurchased(filter) {
       if (!currentUser) {
         showAuthModal();
         return;
       }
+      if (filter) libraryFilter = filter;
 
       await closeStructureBuilder({ save: true });
       document.getElementById('reader-modal').classList.add('hidden');
@@ -938,29 +952,64 @@
       document.getElementById('navbar').classList.remove('hidden');
       hideMainViews();
       document.getElementById('view-purchased').classList.remove('hidden');
+      setLibraryTabStyles();
+
+      const tabs = document.getElementById('library-tabs');
+      if (tabs && !tabs.dataset.wired) {
+        tabs.dataset.wired = '1';
+        tabs.addEventListener('click', (e) => {
+          const btn = e.target.closest('[data-library-filter]');
+          if (!btn) return;
+          showPurchased(btn.dataset.libraryFilter);
+        });
+      }
 
       const grid = document.getElementById('purchased-grid');
       const empty = document.getElementById('purchased-empty');
       grid.innerHTML = '';
 
-      let items = [];
+      let payload = { items: [], counts: {} };
       try {
-        const res = await fetch('/api/me/library');
+        const res = await fetch(`/api/me/library?filter=${encodeURIComponent(libraryFilter)}`);
         if (!res.ok) {
           empty.classList.remove('hidden');
           empty.textContent = 'Could not load your library. Try again.';
           return;
         }
-        items = await res.json();
+        payload = await res.json();
+        // Back-compat if server returns a bare array
+        if (Array.isArray(payload)) payload = { items: payload, counts: {} };
       } catch (e) {
         empty.classList.remove('hidden');
         empty.textContent = 'Could not load your library. Try again.';
         return;
       }
 
+      const counts = payload.counts || {};
+      document.querySelectorAll('.library-tab').forEach((btn) => {
+        const key = btn.dataset.libraryFilter;
+        const n = counts[key];
+        const labels = {
+          all: 'All',
+          purchased: 'Purchased',
+          saved: 'Saved',
+          read: 'Previously Read',
+        };
+        btn.textContent = n != null ? `${labels[key] || key} (${n})` : (labels[key] || key);
+      });
+      setLibraryTabStyles();
+
+      const items = payload.items || [];
+      const emptyMsgs = {
+        all: 'Your library is empty. Buy a story, save a free one, or start reading from Browse.',
+        purchased: "You haven't purchased any stories yet.",
+        saved: 'No saved free stories yet. Open a free story and tap Save to My Library.',
+        read: "You haven't opened any stories yet. Read one and it will show up here.",
+      };
+
       if (!items.length) {
         empty.classList.remove('hidden');
-        empty.textContent = "You haven't purchased any stories yet. Browse the catalog to find one.";
+        empty.textContent = emptyMsgs[libraryFilter] || 'Nothing here yet.';
         return;
       }
       empty.classList.add('hidden');
@@ -968,10 +1017,13 @@
       items.forEach((comic) => {
         const div = document.createElement('div');
         div.className = 'comic-card bg-slate-900 border border-slate-800 rounded-3xl p-4 sm:p-5 cursor-pointer overflow-hidden';
-        const accessLabel = comic.access === 'full' ? 'Full story' : `Chapter access (${comic.chapter_unlock_count || 1})`;
+        const chips = [];
+        if (comic.purchased) chips.push('<span class="px-2 py-0.5 rounded-full bg-emerald-900/50 text-emerald-300 text-[10px]">Purchased</span>');
+        if (comic.saved) chips.push('<span class="px-2 py-0.5 rounded-full bg-blue-900/50 text-blue-300 text-[10px]">Saved</span>');
+        if (comic.previously_read) chips.push('<span class="px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 text-[10px]">Previously Read</span>');
         const marketNote = comic.on_marketplace
-          ? '<span class="text-emerald-400/90">On Browse</span>'
-          : '<span class="text-amber-400/90">Removed from Browse — still in your library</span>';
+          ? ''
+          : '<div class="mt-1 text-xs text-amber-400/90">Off Browse — still in your library</div>';
         const cover = comic.cover_image
           ? `<div class="mb-3 rounded-2xl overflow-hidden bg-slate-950 aspect-[3/2]"><img src="${escapeHtml(comic.cover_image)}" alt="" class="w-full h-full object-cover"></div>`
           : '';
@@ -979,7 +1031,8 @@
           ${cover}
           <div class="font-semibold text-xl">${escapeHtml(comic.title || 'Untitled')}</div>
           <div class="text-sm text-slate-400 mt-0.5">by ${escapeHtml(comic.author || 'Unknown')} · ${comic.page_count || 0} pages</div>
-          <div class="mt-1 text-xs text-slate-500">${accessLabel} · ${marketNote}</div>
+          <div class="mt-2 flex flex-wrap gap-1.5">${chips.join('')}</div>
+          ${marketNote}
           <div class="mt-5 flex gap-2 text-sm">
             <button type="button" class="flex-1 py-2 bg-blue-600 hover:bg-blue-500 rounded-2xl text-xs sm:text-sm text-white" data-action="read">Read</button>
             <button type="button" class="flex-1 py-2 border border-slate-700 hover:bg-slate-800 rounded-2xl text-xs sm:text-sm" data-action="info">Details</button>
@@ -999,7 +1052,6 @@
             showComicInfo(id);
             return;
           }
-          // default / Read → open reader (live edition)
           openReader(id);
         });
       });
@@ -2970,6 +3022,7 @@
 
       const sampleBtn = document.getElementById('info-read-sample-btn');
       const purchaseBtn = document.getElementById('info-purchase-btn');
+      const saveBtn = document.getElementById('info-library-save-btn');
       const tip = document.getElementById('info-sample-tip');
       const creditBalEl = document.getElementById('info-credit-balance');
       if (creditBalEl) {
@@ -2978,6 +3031,57 @@
           creditBalEl.innerHTML = `Your credits: $${((currentUser.credit_balance_cents || 0) / 100).toFixed(2)} · <button type="button" class="underline text-blue-400" onclick="closeComicInfo(); showCreditsModal()">Add credits</button>`;
         } else {
           creditBalEl.classList.add('hidden');
+        }
+      }
+
+      // Save free stories to My Library (paid already appear under Purchased)
+      if (saveBtn) {
+        const isFree = !price || parseFloat(price) === 0;
+        if (currentUser && isFree && !isOwner) {
+          saveBtn.classList.remove('hidden');
+          let saved = false;
+          try {
+            const st = await fetch(`/api/me/library/status/${comicId}`);
+            if (st.ok) {
+              const s = await st.json();
+              saved = !!s.saved;
+            }
+          } catch (e) {}
+          const paintSave = () => {
+            saveBtn.textContent = saved ? 'Remove from My Library' : 'Save to My Library';
+            saveBtn.className = saved
+              ? 'w-full py-2.5 rounded-2xl border border-slate-600 bg-slate-800/80 hover:bg-slate-800 text-sm font-medium transition-colors'
+              : 'w-full py-2.5 rounded-2xl border border-blue-700/60 text-blue-200 hover:bg-blue-950/40 text-sm font-medium transition-colors';
+          };
+          paintSave();
+          saveBtn.onclick = async () => {
+            saveBtn.disabled = true;
+            try {
+              if (saved) {
+                const r = await fetch(`/api/me/library/save/${comicId}`, { method: 'DELETE' });
+                if (!r.ok) {
+                  const d = await r.json().catch(() => ({}));
+                  alert(d.error || 'Could not update library');
+                  return;
+                }
+                saved = false;
+              } else {
+                const r = await fetch(`/api/me/library/save/${comicId}`, { method: 'POST' });
+                if (!r.ok) {
+                  const d = await r.json().catch(() => ({}));
+                  alert(d.error || 'Could not save to library');
+                  return;
+                }
+                saved = true;
+              }
+              paintSave();
+            } finally {
+              saveBtn.disabled = false;
+            }
+          };
+        } else {
+          saveBtn.classList.add('hidden');
+          saveBtn.onclick = null;
         }
       }
 
@@ -3139,6 +3243,10 @@
       pageHistory = [];
       if (currentUser) {
         try {
+          // Previously Read — mark open in reader
+          if (!options.fromEditor) {
+            fetch(`/api/me/library/read/${comicId}`, { method: 'POST' }).catch(() => {});
+          }
           const purchRes = await fetch(`/api/comics/${comicId}/purchased`);
           const purchData = await purchRes.json();
           hasPurchasedComic = purchData.purchased;
