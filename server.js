@@ -195,7 +195,7 @@ db.exec(`
     comic_id INTEGER NOT NULL,
     amount_paid_cents INTEGER NOT NULL,
     stripe_payment_intent TEXT,
-    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    purchased_at TEXT DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(user_id, comic_id),
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
     FOREIGN KEY (comic_id) REFERENCES comics(id) ON DELETE CASCADE
@@ -272,6 +272,10 @@ try {
 } catch (e) {}
 try {
   db.exec(`ALTER TABLE comics ADD COLUMN cover_image TEXT`);
+} catch (e) {}
+// purchases: live DBs use purchased_at (not created_at)
+try {
+  db.exec(`ALTER TABLE purchases ADD COLUMN purchased_at TEXT DEFAULT CURRENT_TIMESTAMP`);
 } catch (e) {}
 
 // Pages / choices columns added after first production DBs were created
@@ -2050,7 +2054,7 @@ app.get('/api/me/library', requireAuth, (req, res) => {
       (SELECT COUNT(*) FROM chapter_unlocks cu WHERE cu.user_id = ? AND cu.comic_id = c.id) as chapter_unlock_count,
       (
         SELECT MAX(t.acquired_at) FROM (
-          SELECT p.created_at as acquired_at FROM purchases p
+          SELECT p.purchased_at as acquired_at FROM purchases p
             WHERE p.user_id = ? AND p.comic_id = c.id
           UNION ALL
           SELECT cu.created_at as acquired_at FROM chapter_unlocks cu
