@@ -180,6 +180,21 @@
       #library-tabs .library-tab {
         flex-shrink: 0;
       }
+      /* Story Details: keep modal inside viewport; body scrolls */
+      #comic-info-modal {
+        align-items: flex-end;
+        padding: 0;
+      }
+      #comic-info-panel {
+        max-height: 92dvh;
+        max-height: 92vh;
+        margin-top: 0;
+        border-bottom-left-radius: 0;
+        border-bottom-right-radius: 0;
+      }
+      #comic-info-scroll {
+        -webkit-overflow-scrolling: touch;
+      }
     }
 
     /* Mobile account menu items */
@@ -499,16 +514,17 @@
 
   <!-- COMIC INFO / TITLE + DESCRIPTION MODAL (shown first when browsing) -->
   <div id="comic-info-modal" onclick="if (event.target.id === 'comic-info-modal') closeComicInfo()" 
-       class="hidden fixed inset-0 bg-black/90 z-[55] flex items-center justify-center p-4">
-    <div onclick="event.stopImmediatePropagation()" 
-         class="w-full max-w-[520px] bg-slate-900 rounded-3xl border border-slate-700 overflow-hidden flex flex-col mt-4 sm:mt-16">
-      <!-- Header -->
-      <div class="px-6 py-3.5 border-b border-slate-800 flex items-center justify-between text-sm">
+       class="hidden fixed inset-0 bg-black/90 z-[55] flex items-end sm:items-center justify-center p-0 sm:p-4">
+    <div id="comic-info-panel" onclick="event.stopImmediatePropagation()" 
+         class="w-full max-w-[520px] max-h-[min(92dvh,720px)] bg-slate-900 rounded-t-3xl sm:rounded-3xl border border-slate-700 overflow-hidden flex flex-col shadow-2xl">
+      <!-- Header (fixed) -->
+      <div class="px-5 sm:px-6 py-3.5 border-b border-slate-800 flex items-center justify-between text-sm flex-shrink-0">
         <div class="text-slate-400">Story Details</div>
-        <button onclick="closeComicInfo()" class="text-slate-400 hover:text-white px-2">Close</button>
+        <button type="button" onclick="closeComicInfo()" class="text-slate-400 hover:text-white px-2 py-1">Close</button>
       </div>
 
-      <div class="p-4 sm:p-6 overflow-y-auto max-h-[min(70vh,640px)]">
+      <!-- Scrollable body (title through chapters) -->
+      <div id="comic-info-scroll" class="flex-1 min-h-0 overflow-y-auto overscroll-contain p-4 sm:p-6">
         <div id="info-title" class="text-2xl font-semibold tracking-tight"></div>
         <div id="info-author" class="mt-1 text-sm"></div>
 
@@ -549,16 +565,16 @@
           </div>
           <div id="info-comments-list" class="space-y-2 max-h-44 overflow-y-auto text-sm"></div>
         </div>
+
+        <!-- Chapters (if any) — inside scroll so actions stay visible -->
+        <div id="info-chapters-wrap" class="hidden mt-5">
+          <div class="uppercase text-[10px] tracking-[1px] text-slate-500 mb-1.5">Chapters</div>
+          <div id="info-chapters-list" class="space-y-1.5"></div>
+        </div>
       </div>
 
-      <!-- Chapters (if any) -->
-      <div id="info-chapters-wrap" class="hidden px-4 sm:px-6 pb-2">
-        <div class="uppercase text-[10px] tracking-[1px] text-slate-500 mb-1.5">Chapters</div>
-        <div id="info-chapters-list" class="space-y-1.5 max-h-40 overflow-auto"></div>
-      </div>
-
-      <!-- Action buttons -->
-      <div class="p-4 sm:p-6 pt-4 border-t border-slate-800 bg-slate-950 flex flex-col gap-2.5">
+      <!-- Action buttons always pinned at bottom -->
+      <div class="p-4 sm:p-5 border-t border-slate-800 bg-slate-950 flex flex-col gap-2.5 flex-shrink-0">
         <button id="info-read-sample-btn"
                 class="w-full py-3 rounded-2xl bg-slate-800 hover:bg-slate-700 active:bg-slate-600 text-sm font-medium transition-colors">
           Read Sample (first choice free)
@@ -572,7 +588,7 @@
           Save to My Library
         </button>
         <div id="info-credit-balance" class="hidden text-[11px] text-center text-slate-400"></div>
-        <div id="info-sample-tip" class="text-[10px] text-center text-slate-500 pt-1">First choice is free</div>
+        <div id="info-sample-tip" class="text-[10px] text-center text-slate-500 pt-0.5">First choice is free</div>
       </div>
     </div>
   </div>
