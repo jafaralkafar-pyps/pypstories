@@ -165,6 +165,63 @@
       el.remove();
     }
 
+    /** When set, Browse lists only this creator's published works (/search/username). */
+    let authorFilter = '';
+
+    function creatorSharePath(username) {
+      const u = String(username || '').trim();
+      if (!u) return '';
+      return `/search/${encodeURIComponent(u)}`;
+    }
+
+    function updateAuthorBrowseBanner() {
+      const banner = document.getElementById('browse-author-banner');
+      const nameEl = document.getElementById('browse-author-name');
+      const heading = document.getElementById('browse-heading');
+      if (!banner || !nameEl) return;
+      if (authorFilter) {
+        banner.classList.remove('hidden');
+        nameEl.textContent = '@' + authorFilter;
+        if (heading && catalogMode === 'browse') {
+          heading.textContent = 'Stories by @' + authorFilter;
+        }
+      } else {
+        banner.classList.add('hidden');
+        nameEl.textContent = '';
+        if (heading && catalogMode === 'browse') {
+          heading.textContent = 'Browse interactive stories & comics';
+        }
+      }
+    }
+
+    function clearAuthorFilter() {
+      authorFilter = '';
+      const search = document.getElementById('search-input');
+      if (search) search.value = '';
+      updateAuthorBrowseBanner();
+      if (window.history && window.history.replaceState) {
+        window.history.replaceState({}, document.title, '/browse' === window.location.pathname ? '/browse' : window.location.pathname === '/' ? '/' : '/');
+        // Prefer clean browse path when clearing a creator search
+        if (window.location.pathname.startsWith('/search/')) {
+          window.history.replaceState({}, document.title, '/');
+        }
+      }
+      showBrowse();
+    }
+
+    /** Open Browse filtered to a creator's published stories (share link target). */
+    function showCreatorPublished(username) {
+      const u = String(username || '').trim();
+      if (!u || !/^[a-zA-Z0-9_-]{1,32}$/.test(u)) {
+        showBrowse();
+        return;
+      }
+      authorFilter = u;
+      const search = document.getElementById('search-input');
+      if (search) search.value = '';
+      showCatalog('browse');
+    }
+
     function showCatalog(mode) {
       // Fire-and-forget save+close so navbar works from Structure page
       closeStructureBuilder({ save: true });
@@ -179,13 +236,19 @@
       const browseHeading = document.getElementById('browse-heading');
       const seoAbout = document.getElementById('seo-about');
       if (mode === 'home') {
+        // Home shows full catalog; drop author filter so landing stays general
+        if (authorFilter && !window.location.pathname.startsWith('/search/')) {
+          authorFilter = '';
+        }
         hero.classList.remove('hidden');
         browseHeading.classList.add('hidden');
         if (seoAbout) seoAbout.classList.remove('hidden');
+        document.getElementById('browse-author-banner')?.classList.add('hidden');
       } else {
         hero.classList.add('hidden');
         browseHeading.classList.remove('hidden');
         if (seoAbout) seoAbout.classList.add('hidden');
+        updateAuthorBrowseBanner();
       }
       guardSearchAgainstAutofill();
       loadComics();
@@ -844,6 +907,7 @@
 
       const params = new URLSearchParams();
       if (q) params.append('q', q);
+      if (authorFilter) params.append('author', authorFilter);
       if (genre && genre !== 'All') params.append('genre', genre);
       if (sort) params.append('sort', sort);
 
@@ -851,6 +915,14 @@
       allComics = await res.json();
 
       renderComicsGrid(allComics, document.getElementById('comics-grid'), true);
+
+      const emptyEl = document.getElementById('browse-empty');
+      if (emptyEl && authorFilter && !allComics.length) {
+        emptyEl.classList.remove('hidden');
+        emptyEl.textContent = `No published stories found for @${authorFilter}.`;
+      } else if (emptyEl && !allComics.length) {
+        emptyEl.textContent = 'No stories match your filters.';
+      }
     }
 
     function renderComicsGrid(comics, container, showEmpty = true) {
@@ -899,6 +971,25 @@
       });
     }
 
+    function updateCreatorShareBox() {
+      const box = document.getElementById('creator-share-box');
+      const input = document.getElementById('creator-share-url');
+      const status = document.getElementById('creator-share-copy-status');
+      if (!box || !input) return;
+      if (status) status.classList.add('hidden');
+
+      const un = currentUser && currentUser.username;
+      if (!un) {
+        box.classList.add('hidden');
+        return;
+      }
+
+      const path = creatorSharePath(un);
+      const origin = window.location.origin || '';
+      input.value = origin + path;
+      box.classList.remove('hidden');
+    }
+
     // === MY COMICS ===
     async function showMyComics() {
       if (!currentUser) {
@@ -932,6 +1023,8 @@
         btns[1].onclick = () => showAccount();
         document.getElementById('view-my-comics').prepend(connectDiv);
       }
+
+      updateCreatorShareBox();
 
       const res = await fetch('/api/comics?sort=new&my=1');
       const all = await res.json();
@@ -1225,10 +1318,23 @@
     }
 
     function showHome() {
+      authorFilter = '';
+      updateAuthorBrowseBanner();
       showCatalog('home');
     }
 
     function showBrowse() {
+      // Nav "Browse" shows full catalog (not stuck on a creator share filter)
+      if (authorFilter && !window.location.pathname.startsWith('/search/')) {
+        authorFilter = '';
+      } else if (window.location.pathname.startsWith('/search/')) {
+        // Leaving a deep link for normal browse
+        authorFilter = '';
+        if (window.history && window.history.replaceState) {
+          window.history.replaceState({}, document.title, '/');
+        }
+      }
+      updateAuthorBrowseBanner();
       showCatalog('browse');
     }
 
@@ -3826,9 +3932,56 @@
         }
       }
 
-      // Show landing page by default
-      if (!stripeConnect) showHome();
-      else if (!currentUser) showHome();
+      // Creator share links: /search/username → Browse filtered to their published works
+      const pathParts = (window.location.pathname || '/').split('/').filter(Boolean);
+      let deepCreator = null;
+      if (pathParts[0] === 'search' && pathParts[1]) {
+        try {
+          deepCreator = decodeURIComponent(pathParts[1]);
+        } catch (e) {
+          deepCreator = pathParts[1];
+        }
+      }
+      if (!deepCreator && urlParams.get('author')) {
+        deepCreator = urlParams.get('author');
+      }
+
+      const clearAuthorBtn = document.getElementById('browse-author-clear');
+      if (clearAuthorBtn) {
+        clearAuthorBtn.addEventListener('click', () => clearAuthorFilter());
+      }
+      const copyShareBtn = document.getElementById('creator-share-copy');
+      if (copyShareBtn) {
+        copyShareBtn.addEventListener('click', async () => {
+          const input = document.getElementById('creator-share-url');
+          const status = document.getElementById('creator-share-copy-status');
+          if (!input || !input.value) return;
+          try {
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+              await navigator.clipboard.writeText(input.value);
+            } else {
+              input.select();
+              document.execCommand('copy');
+            }
+            if (status) {
+              status.classList.remove('hidden');
+              setTimeout(() => status.classList.add('hidden'), 2000);
+            }
+          } catch (e) {
+            input.select();
+            alert('Copy failed — select the link and copy manually.');
+          }
+        });
+      }
+
+      // Show landing page by default (unless deep link or Stripe return)
+      if (deepCreator) {
+        showCreatorPublished(deepCreator);
+      } else if (!stripeConnect) {
+        showHome();
+      } else if (!currentUser) {
+        showHome();
+      }
       guardSearchAgainstAutofill();
     }
 

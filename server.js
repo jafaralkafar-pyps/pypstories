@@ -1768,9 +1768,11 @@ app.get('/api/public-config', (req, res) => {
 
 // Browse / search comics
 app.get('/api/comics', (req, res) => {
-  const { q = '', genre = '', sort = 'new' } = req.query;
+  const { q = '', genre = '', sort = 'new', author = '' } = req.query;
   const currentUserId = req.session.userId || 0;
   const isMy = req.query.my === '1' && currentUserId;
+  // Exact creator filter for share links: /search/username → ?author=
+  const authorFilter = String(author || '').trim();
 
   let sql = `
     SELECT c.*, u.username as author,
@@ -1789,6 +1791,11 @@ app.get('/api/comics', (req, res) => {
     params.push(currentUserId);
   } else {
     sql += ` WHERE c.status = 'published' `;
+  }
+
+  if (authorFilter) {
+    sql += ` AND u.username IS NOT NULL AND LOWER(u.username) = LOWER(?) `;
+    params.push(authorFilter);
   }
 
   if (q) {
