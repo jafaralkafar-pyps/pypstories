@@ -3177,6 +3177,21 @@
       }
       document.getElementById('info-description').textContent = desc;
 
+      // Share link (published stories only) — opens Story Details via /?comic=ID
+      const shareBox = document.getElementById('info-share-box');
+      const shareInput = document.getElementById('info-share-url');
+      const shareStatus = document.getElementById('info-share-copy-status');
+      if (shareStatus) shareStatus.classList.add('hidden');
+      if (shareBox && shareInput) {
+        if (comic.status === 'published') {
+          shareInput.value = `${window.location.origin}/?comic=${comicId}`;
+          shareBox.classList.remove('hidden');
+        } else {
+          shareInput.value = '';
+          shareBox.classList.add('hidden');
+        }
+      }
+
       // Determine ownership for button states
       let hasPurchased = false;
       if (currentUser) {
@@ -3950,29 +3965,39 @@
       if (clearAuthorBtn) {
         clearAuthorBtn.addEventListener('click', () => clearAuthorFilter());
       }
+      async function copyFromInput(inputId, statusId) {
+        const input = document.getElementById(inputId);
+        const status = document.getElementById(statusId);
+        if (!input || !input.value) return;
+        try {
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            await navigator.clipboard.writeText(input.value);
+          } else {
+            input.select();
+            document.execCommand('copy');
+          }
+          if (status) {
+            status.classList.remove('hidden');
+            setTimeout(() => status.classList.add('hidden'), 2000);
+          }
+        } catch (e) {
+          input.select();
+          alert('Copy failed — select the link and copy manually.');
+        }
+      }
+
       const copyShareBtn = document.getElementById('creator-share-copy');
       if (copyShareBtn) {
-        copyShareBtn.addEventListener('click', async () => {
-          const input = document.getElementById('creator-share-url');
-          const status = document.getElementById('creator-share-copy-status');
-          if (!input || !input.value) return;
-          try {
-            if (navigator.clipboard && navigator.clipboard.writeText) {
-              await navigator.clipboard.writeText(input.value);
-            } else {
-              input.select();
-              document.execCommand('copy');
-            }
-            if (status) {
-              status.classList.remove('hidden');
-              setTimeout(() => status.classList.add('hidden'), 2000);
-            }
-          } catch (e) {
-            input.select();
-            alert('Copy failed — select the link and copy manually.');
-          }
-        });
+        copyShareBtn.addEventListener('click', () => copyFromInput('creator-share-url', 'creator-share-copy-status'));
       }
+      const infoShareCopy = document.getElementById('info-share-copy');
+      if (infoShareCopy) {
+        infoShareCopy.addEventListener('click', () => copyFromInput('info-share-url', 'info-share-copy-status'));
+      }
+
+      // Deep link: /?comic=123 → open Story Details
+      const deepComicRaw = urlParams.get('comic') || (pathParts[0] === 'story' && pathParts[1] ? pathParts[1] : null);
+      const deepComicId = deepComicRaw ? parseInt(deepComicRaw, 10) : NaN;
 
       // Show landing page by default (unless deep link or Stripe return)
       if (deepCreator) {
@@ -3981,6 +4006,14 @@
         showHome();
       } else if (!currentUser) {
         showHome();
+      }
+
+      if (Number.isFinite(deepComicId) && deepComicId > 0) {
+        try {
+          await showComicInfo(deepComicId);
+        } catch (e) {
+          console.error('Deep link comic failed', e);
+        }
       }
       guardSearchAgainstAutofill();
     }

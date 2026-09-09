@@ -609,6 +609,20 @@
           <div id="info-description" class="text-[15px] text-slate-200 leading-relaxed whitespace-pre-line max-h-[100px] overflow-auto pr-1"></div>
         </div>
 
+        <div id="info-share-box" class="hidden mt-4 border border-slate-800 rounded-2xl p-3 bg-slate-950/60">
+          <div class="uppercase text-[10px] tracking-[1px] text-slate-500 mb-1.5">Share this story</div>
+          <div class="flex flex-col sm:flex-row gap-2 items-stretch sm:items-center">
+            <input id="info-share-url" type="text" readonly
+                   class="flex-1 min-w-0 bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs sm:text-sm text-slate-200 font-mono"
+                   value="">
+            <button type="button" id="info-share-copy"
+                    class="px-4 py-2 bg-blue-600 hover:bg-blue-500 rounded-xl text-xs sm:text-sm font-medium whitespace-nowrap">
+              Copy link
+            </button>
+          </div>
+          <p id="info-share-copy-status" class="hidden mt-2 text-xs text-emerald-400">Copied!</p>
+        </div>
+
         <div class="mt-4 border border-slate-800 rounded-2xl p-3 bg-slate-950/60">
           <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
             <div class="uppercase text-[10px] tracking-[1px] text-slate-500">Your rating</div>
