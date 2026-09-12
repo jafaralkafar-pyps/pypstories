@@ -304,6 +304,139 @@
     #editor-section.hidden {
       display: none !important;
     }
+    #editor-section:not(.hidden) {
+      display: flex !important;
+      flex-direction: column;
+    }
+    #editor-section-scroll {
+      flex: 1 1 auto;
+      min-height: 0;
+      overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
+      overscroll-behavior: contain;
+    }
+    #editor-section-actions {
+      flex: 0 0 auto;
+      padding-top: 0.75rem;
+      margin-top: 0.25rem;
+      border-top: 1px solid #334155;
+      background: #0f172a;
+    }
+
+    /* ——— Reader: header + choices pinned; story scrolls ——— */
+    #reader-modal:not(.hidden) {
+      display: flex !important;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    #reader-modal-panel {
+      display: flex;
+      flex-direction: column;
+      height: 100%;
+      min-height: 0;
+      overflow: hidden;
+    }
+    #reader-scroll {
+      flex: 1 1 auto;
+      min-height: 0;
+      overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
+      overscroll-behavior: contain;
+    }
+    #reader-choices-footer {
+      flex: 0 0 auto;
+      max-height: 40vh;
+      overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
+    }
+
+    /* ——— Centered dialogs: fit viewport, body scrolls ——— */
+    .viewport-dialog {
+      display: none;
+      position: fixed;
+      inset: 0;
+      align-items: center;
+      justify-content: center;
+      padding: 0.75rem;
+      padding-top: max(0.75rem, env(safe-area-inset-top));
+      padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
+      box-sizing: border-box;
+      overflow: hidden;
+    }
+    .viewport-dialog:not(.hidden) {
+      display: flex !important;
+    }
+    .viewport-dialog-panel {
+      width: 100%;
+      max-height: min(90dvh, 720px);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      box-sizing: border-box;
+    }
+    .viewport-dialog-scroll {
+      flex: 1 1 auto;
+      min-height: 0;
+      overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
+      overscroll-behavior: contain;
+    }
+
+    /* ——— Structure builder (injected) ——— */
+    #structure-builder-page {
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    #structure-builder-page > .structure-builder-inner {
+      display: flex;
+      flex-direction: column;
+      height: 100%;
+      min-height: 0;
+      overflow: hidden;
+    }
+    #structure-builder-page #choice-slots,
+    #structure-builder-page #pages-palette {
+      min-height: 0;
+      overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
+    }
+    #structure-builder-main {
+      flex: 1 1 auto;
+      min-height: 0;
+      overflow: hidden;
+      display: grid;
+    }
+    #structure-builder-main > div {
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+      height: 100%;
+      overflow: hidden;
+    }
+    @media (max-width: 1023px) {
+      #structure-builder-main {
+        overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
+      }
+      #structure-builder-main > div {
+        height: auto;
+        min-height: 260px;
+        max-height: 55vh;
+      }
+    }
+
+    /* Main catalog/account pages: keep footer reachable */
+    body {
+      overflow-x: hidden;
+    }
+    #view-catalog,
+    #view-account,
+    #view-my-comics,
+    #view-purchased,
+    #view-admin-reviews {
+      padding-bottom: 2rem;
+    }
   </style>
 </head>
 <body class="bg-slate-950 text-slate-200">
@@ -573,8 +706,8 @@
   <!-- COMIC READER (above editor so Preview is visible) -->
   <div id="reader-modal" 
        class="hidden fixed top-14 sm:top-16 left-0 right-0 bottom-0 bg-black/90 z-[45] flex flex-col overflow-hidden">
-    <div onclick="event.stopImmediatePropagation()" 
-         class="w-full h-full bg-slate-900 border border-slate-700 flex flex-col min-h-0" style="height:100%;">
+    <div id="reader-modal-panel" onclick="event.stopImmediatePropagation()" 
+         class="w-full h-full bg-slate-900 border border-slate-700 flex flex-col min-h-0">
       
       <!-- Reader Header -->
       <div class="px-4 sm:px-6 py-3 sm:py-4 border-b border-slate-800 flex items-center justify-between flex-shrink-0">
@@ -590,7 +723,7 @@
       </div>
 
       <!-- Story Content -->
-      <div id="reader-scroll" class="flex-1 overflow-auto p-4 sm:p-6 bg-slate-950 min-h-0">
+      <div id="reader-scroll" class="p-4 sm:p-6 bg-slate-950">
         <div id="reader-content" class="max-w-4xl mx-auto px-1">
           <div id="reader-image-container" class="mb-6 rounded-2xl overflow-hidden border border-slate-800 bg-slate-900">
             <img id="reader-image" class="w-full h-auto block" style="display:none">
@@ -607,7 +740,7 @@
       </div>
 
       <!-- Choices (compact footer — thumbs only, never full page art) -->
-      <div class="p-3 sm:p-4 border-t border-slate-800 bg-slate-900 flex-shrink-0 max-h-[40vh] overflow-y-auto">
+      <div id="reader-choices-footer" class="p-3 sm:p-4 border-t border-slate-800 bg-slate-900">
         <div class="max-w-[720px] mx-auto">
           <div class="flex flex-col sm:flex-row gap-2 sm:gap-3 items-stretch" id="reader-choices-row">
             <button id="reader-back-btn"
@@ -714,13 +847,13 @@
 
   <!-- CREDITS MODAL -->
   <div id="credits-modal" onclick="if (event.target.id === 'credits-modal') closeCreditsModal()"
-       class="hidden fixed inset-0 bg-black/90 z-[70] flex items-center justify-center p-4">
-    <div onclick="event.stopImmediatePropagation()" class="w-full max-w-md bg-slate-900 border border-slate-700 rounded-3xl overflow-hidden">
-      <div class="px-5 py-3.5 border-b border-slate-800 flex items-center justify-between">
+       class="hidden viewport-dialog bg-black/90 z-[70]">
+    <div onclick="event.stopImmediatePropagation()" class="viewport-dialog-panel w-full max-w-md bg-slate-900 border border-slate-700 rounded-3xl">
+      <div class="px-5 py-3.5 border-b border-slate-800 flex items-center justify-between flex-shrink-0">
         <div class="font-semibold">Credits</div>
-        <button onclick="closeCreditsModal()" class="text-slate-400 hover:text-white px-2">Close</button>
+        <button type="button" onclick="closeCreditsModal()" class="text-slate-400 hover:text-white px-2">Close</button>
       </div>
-      <div class="p-5 space-y-4">
+      <div class="viewport-dialog-scroll p-5 space-y-4">
         <div class="text-sm text-slate-400">1 credit = $0.01. Use credits for chapters (e.g. $0.99). Stripe fees on top-ups are absorbed by the platform.</div>
         <div class="text-2xl font-semibold">Balance: $<span id="credits-balance-display">0.00</span></div>
         <div id="credits-packages" class="space-y-2"></div>
@@ -776,7 +909,8 @@
 
       <!-- Editor view inside modal (after story is created) -->
       <div id="editor-section" class="hidden flex-1 flex flex-col min-h-0">
-        <div class="mb-4 flex-shrink-0">
+        <div id="editor-section-scroll" class="pr-0.5 pb-2">
+        <div class="mb-4">
           <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
             <div class="flex-1 min-w-0">
               <label class="text-[10px] text-slate-500 block mb-0.5">Story title</label>
@@ -796,9 +930,9 @@
                       class="text-xs sm:text-sm px-3 sm:px-4 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-600 rounded-xl">
                 Add Cover
               </button>
-              <button onclick="addNewPage()" 
+              <button type="button" onclick="addNewPage()" 
                       class="text-xs sm:text-sm px-3 sm:px-4 py-1.5 bg-blue-600 hover:bg-blue-500 rounded-xl">+ Add Page(s)</button>
-              <button onclick="openStoryBuilder()" 
+              <button type="button" onclick="openStoryBuilder()" 
                       class="text-xs sm:text-sm px-3 sm:px-4 py-1.5 bg-purple-600 hover:bg-purple-500 rounded-xl">Build Structure</button>
               <input type="file" id="editor-cover-input" accept="image/*" class="hidden">
             </div>
@@ -819,7 +953,7 @@
           </div>
         </div>
 
-        <div class="mb-4 p-3 bg-slate-950 border border-slate-800 rounded-2xl flex-shrink-0">
+        <div class="mb-4 p-3 bg-slate-950 border border-slate-800 rounded-2xl">
           <div class="flex items-center justify-between gap-2 mb-2">
             <div class="text-xs font-medium text-slate-300">Chapters (credits — e.g. $0.99 each)</div>
             <button type="button" onclick="addEditorChapter()" class="text-xs px-2 py-1 bg-slate-800 hover:bg-slate-700 rounded-xl">+ Chapter</button>
@@ -827,11 +961,12 @@
           <div id="editor-chapters-list" class="space-y-2 text-xs"></div>
         </div>
 
-        <div id="pages-list" class="flex-1 overflow-auto space-y-2 pr-1 min-h-0"></div>
+        <div id="pages-list" class="space-y-2 pr-1"></div>
+        </div>
 
-        <div class="mt-5 flex flex-col sm:flex-row gap-3 text-sm flex-shrink-0">
-          <button onclick="previewComic()" class="flex-1 py-2 border border-slate-700 rounded-2xl hover:bg-slate-800">Preview Reader</button>
-          <button onclick="closeCreateModal()" class="flex-1 py-2 bg-white text-slate-900 font-medium rounded-2xl">Done</button>
+        <div id="editor-section-actions" class="flex flex-col sm:flex-row gap-3 text-sm">
+          <button type="button" onclick="previewComic()" class="flex-1 py-2 border border-slate-700 rounded-2xl hover:bg-slate-800">Preview Reader</button>
+          <button type="button" onclick="closeCreateModal()" class="flex-1 py-2 bg-white text-slate-900 font-medium rounded-2xl">Done</button>
         </div>
       </div>
     </div>
@@ -839,12 +974,13 @@
 
   <!-- Auth Modal -->
   <div id="auth-modal" onclick="if (event.target.id === 'auth-modal') closeAuthModal()" 
-       class="hidden fixed inset-0 bg-black/80 z-[80] flex items-center justify-center p-4">
-    <div onclick="event.stopImmediatePropagation()" class="bg-slate-900 border border-slate-700 rounded-3xl w-full max-w-sm p-5 sm:p-7 mt-4 sm:mt-16">
+       class="hidden viewport-dialog bg-black/80 z-[80]">
+    <div onclick="event.stopImmediatePropagation()" class="viewport-dialog-panel bg-slate-900 border border-slate-700 rounded-3xl w-full max-w-sm">
+      <div class="viewport-dialog-scroll p-5 sm:p-7">
       <div id="auth-tabs" class="flex mb-6 border-b border-slate-800">
-        <button onclick="switchAuthTab('login')" id="tab-login"
+        <button type="button" onclick="switchAuthTab('login')" id="tab-login"
                 class="flex-1 pb-3 text-sm font-medium border-b-2 border-blue-500">Log in</button>
-        <button onclick="switchAuthTab('register')" id="tab-register"
+        <button type="button" onclick="switchAuthTab('register')" id="tab-register"
                 class="flex-1 pb-3 text-sm font-medium text-slate-400">Create account</button>
       </div>
 
@@ -910,21 +1046,23 @@
           <input id="reset-password" type="password" placeholder="New password (min 8 chars)" class="w-full bg-slate-950 border border-slate-700 rounded-2xl px-5 py-3 text-sm">
           <input id="reset-password2" type="password" placeholder="Confirm new password" class="w-full bg-slate-950 border border-slate-700 rounded-2xl px-5 py-3 text-sm">
         </div>
-        <button onclick="submitPasswordReset()" class="mt-5 w-full py-3 bg-white text-slate-900 rounded-2xl font-medium">Reset Password</button>
+        <button type="button" onclick="submitPasswordReset()" class="mt-5 w-full py-3 bg-white text-slate-900 rounded-2xl font-medium">Reset Password</button>
         <div id="reset-error" class="mt-2 text-xs text-red-400 hidden"></div>
+      </div>
       </div>
     </div>
   </div>
 
   <!-- Contact modal -->
   <div id="contact-modal" onclick="if (event.target.id === 'contact-modal') closeContactModal()"
-       class="hidden fixed inset-0 bg-black/80 z-[85] flex items-center justify-center p-4">
+       class="hidden viewport-dialog bg-black/80 z-[85]">
     <div onclick="event.stopImmediatePropagation()"
-         class="bg-slate-900 border border-slate-700 rounded-3xl w-full max-w-md p-5 sm:p-6">
-      <div class="flex items-center justify-between mb-4">
+         class="viewport-dialog-panel bg-slate-900 border border-slate-700 rounded-3xl w-full max-w-md">
+      <div class="flex items-center justify-between px-5 sm:px-6 pt-5 sm:pt-6 pb-3 flex-shrink-0 border-b border-slate-800">
         <h3 class="text-lg font-semibold tracking-tight">Contact us</h3>
         <button type="button" onclick="closeContactModal()" class="text-slate-400 hover:text-white px-2 text-sm">Close</button>
       </div>
+      <div class="viewport-dialog-scroll px-5 sm:px-6 py-4 sm:py-5">
       <p class="text-xs text-slate-500 mb-4">Questions, feedback, or creator support — send a short message and we’ll get back to you by email.</p>
       <form id="contact-form" onsubmit="event.preventDefault(); submitContactForm();" class="space-y-3">
         <div>
@@ -951,6 +1089,7 @@
         <div id="contact-error" class="text-xs text-red-400 hidden"></div>
         <div id="contact-success" class="text-xs text-emerald-400 hidden"></div>
       </form>
+      </div>
     </div>
   </div>
 

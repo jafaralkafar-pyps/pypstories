@@ -2368,51 +2368,51 @@
 
       const widget = document.createElement('div');
       widget.id = 'structure-builder-page';
-      widget.className = 'fixed top-14 sm:top-16 left-0 right-0 bottom-0 z-40 bg-slate-950 flex flex-col';
+      widget.className = 'fixed top-14 sm:top-16 left-0 right-0 bottom-0 z-40 bg-slate-950';
       widget.innerHTML = `
-        <div class="max-w-6xl mx-auto w-full h-full px-4 sm:px-6 py-4 sm:py-6 flex flex-col min-h-0">
-          <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4 flex-shrink-0">
+        <div class="structure-builder-inner max-w-6xl mx-auto w-full h-full px-4 sm:px-6 py-4 sm:py-6">
+          <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4" style="flex:0 0 auto;">
             <div>
               <h2 class="text-2xl sm:text-3xl font-semibold tracking-tighter">Story Structure</h2>
               <p class="text-slate-400 text-sm">Link choices between pages. Changes save when you switch pages.</p>
             </div>
             <div class="flex items-center gap-2 flex-wrap">
               <span id="structure-save-status" class="text-xs text-slate-500">Ready</span>
-              <button id="save-structure" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 rounded-2xl text-sm font-medium">Save</button>
-              <button id="close-builder" class="px-4 py-2 border border-slate-700 hover:bg-slate-900 rounded-2xl text-sm">Back to editor</button>
+              <button type="button" id="save-structure" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 rounded-2xl text-sm font-medium">Save</button>
+              <button type="button" id="close-builder" class="px-4 py-2 border border-slate-700 hover:bg-slate-900 rounded-2xl text-sm">Back to editor</button>
             </div>
           </div>
 
-          <div class="mb-4 flex-shrink-0">
+          <div class="mb-4" style="flex:0 0 auto;">
             <label class="block text-sm font-medium mb-1">Initial / Starting Page</label>
             <div class="flex flex-col sm:flex-row gap-2">
               <select id="initial-page" class="bg-slate-900 border border-slate-700 rounded-2xl px-3 py-2 flex-1 text-sm">
                 ${currentPages.map((p, i) => `<option value="${p.id}" ${p.is_start ? 'selected' : ''}>${escapeHtml(pageDisplayName(p, i))}</option>`).join('')}
               </select>
-              <button id="set-initial" class="px-4 py-2 bg-blue-600 hover:bg-blue-500 rounded-2xl text-sm">Set as Start</button>
+              <button type="button" id="set-initial" class="px-4 py-2 bg-blue-600 hover:bg-blue-500 rounded-2xl text-sm">Set as Start</button>
             </div>
           </div>
 
-          <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6 flex-1 min-h-0">
-            <div class="flex flex-col min-h-0 bg-slate-900 border border-slate-800 rounded-3xl p-3 sm:p-4">
-              <div class="flex flex-col sm:flex-row sm:items-center gap-2 mb-2 flex-shrink-0">
+          <div id="structure-builder-main" class="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6">
+            <div class="flex flex-col min-h-0 bg-slate-900 border border-slate-800 rounded-3xl p-3 sm:p-4" style="min-height:0;overflow:hidden;">
+              <div class="flex flex-col sm:flex-row sm:items-center gap-2 mb-2" style="flex:0 0 auto;">
                 <label class="text-sm font-medium whitespace-nowrap">Edit choices for:</label>
                 <select id="focus-page" class="bg-slate-950 border border-slate-700 rounded-xl px-2 py-1.5 text-sm flex-1"></select>
               </div>
 
-              <div id="focus-page-preview" class="mb-3 p-2 bg-slate-800 rounded-xl flex gap-2 items-center text-xs flex-shrink-0"></div>
+              <div id="focus-page-preview" class="mb-3 p-2 bg-slate-800 rounded-xl flex gap-2 items-center text-xs" style="flex:0 0 auto;"></div>
 
-              <div class="text-sm font-medium mb-2 flex-shrink-0">Choice slots (up to 3)</div>
-              <div id="choice-slots" class="space-y-3 overflow-auto flex-1 min-h-0 pr-1"></div>
+              <div class="text-sm font-medium mb-2" style="flex:0 0 auto;">Choice slots (up to 3)</div>
+              <div id="choice-slots" class="space-y-3 pr-1" style="flex:1 1 auto;"></div>
             </div>
 
-            <div class="flex flex-col min-h-0 bg-slate-900 border border-slate-800 rounded-3xl p-3 sm:p-4">
-              <div class="text-sm font-medium mb-2 flex-shrink-0">All pages (drag into a slot)</div>
-              <div id="pages-palette" class="grid grid-cols-2 sm:grid-cols-3 gap-2 p-2 bg-slate-950 border border-slate-700 rounded-2xl overflow-auto flex-1 min-h-0"></div>
+            <div class="flex flex-col min-h-0 bg-slate-900 border border-slate-800 rounded-3xl p-3 sm:p-4" style="min-height:0;overflow:hidden;">
+              <div class="text-sm font-medium mb-2" style="flex:0 0 auto;">All pages (drag into a slot)</div>
+              <div id="pages-palette" class="grid grid-cols-2 sm:grid-cols-3 gap-2 p-2 bg-slate-950 border border-slate-700 rounded-2xl" style="flex:1 1 auto;"></div>
             </div>
           </div>
 
-          <div class="text-[10px] text-slate-500 mt-3 flex-shrink-0">Drag pages into the 3 choice slots. Switching the focused page auto-saves that page’s choices.</div>
+          <div class="text-[10px] text-slate-500 mt-3" style="flex:0 0 auto;">Drag pages into the 3 choice slots. Switching the focused page auto-saves that page’s choices.</div>
         </div>
       `;
 
