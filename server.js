@@ -895,6 +895,27 @@ function tryDeleteUploadUrl(url) {
   }
 }
 
+/**
+ * Any content change after approval/publish invalidates marketplace approval.
+ * Drops story to draft (off Browse if it was live) so creator must Submit for Review again.
+ * Returns true if status changed.
+ */
+function invalidateComicReviewOnEdit(comicId) {
+  const comic = db.prepare('SELECT id, status FROM comics WHERE id = ?').get(comicId);
+  if (!comic) return false;
+  if (!['published', 'approved', 'submitted', 'in_review'].includes(comic.status)) {
+    return false;
+  }
+  db.prepare(`
+    UPDATE comics
+    SET status = 'draft',
+        reviewed_by = NULL,
+        review_notes = NULL
+    WHERE id = ?
+  `).run(comicId);
+  return true;
+}
+
 function userHasFullAccess(userId, comicId) {
   if (userId == null || comicId == null) return false;
   const comic = db.prepare('SELECT user_id, reviewed_by, status FROM comics WHERE id = ?').get(comicId);
@@ -1612,6 +1633,7 @@ app.post('/api/comics/:id/chapters', requireAuth, requireVerified, (req, res) =>
     INSERT INTO chapters (comic_id, title, sort_order, price_cents)
     VALUES (?, ?, ?, ?)
   `).run(comicId, titleCheck.text, maxOrder + 1, price_cents);
+  invalidateComicReviewOnEdit(comicId);
 
   const chapter = db.prepare('SELECT * FROM chapters WHERE id = ?').get(result.lastInsertRowid);
   res.status(201).json(chapter);
@@ -1652,6 +1674,7 @@ app.patch('/api/chapters/:id', requireAuth, requireVerified, (req, res) => {
   if (!updates.length) return res.status(400).json({ error: 'Nothing to update' });
   values.push(chapter.id);
   db.prepare(`UPDATE chapters SET ${updates.join(', ')} WHERE id = ?`).run(...values);
+  invalidateComicReviewOnEdit(chapter.comic_id);
   res.json(db.prepare('SELECT * FROM chapters WHERE id = ?').get(chapter.id));
 });
 
@@ -1664,6 +1687,7 @@ app.delete('/api/chapters/:id', requireAuth, requireVerified, (req, res) => {
     return res.status(403).json({ error: 'Not allowed' });
   }
   db.prepare('DELETE FROM chapters WHERE id = ?').run(chapter.id);
+  invalidateComicReviewOnEdit(chapter.comic_id);
   res.json({ success: true });
 });
 
@@ -2479,9 +2503,11 @@ app.post('/api/comics/:id', requireAuth, requireVerified, (req, res) => {
 
   values.push(comicId);
   db.prepare(`UPDATE comics SET ${updates.join(', ')} WHERE id = ?`).run(...values);
+  const reviewInvalidated = invalidateComicReviewOnEdit(comicId);
 
   const updated = db.prepare('SELECT * FROM comics WHERE id = ?').get(comicId);
   updated.price = updated.price_cents ? (updated.price_cents / 100).toFixed(2) : null;
+  updated.review_invalidated = reviewInvalidated;
   res.json(updated);
 });
 
@@ -2502,6 +2528,7 @@ app.post('/api/comics/:id/cover', requireAuth, requireVerified, uploadSingle('co
   const coverUrl = storageService.getPublicUrl(key);
 
   db.prepare('UPDATE comics SET cover_image = ? WHERE id = ?').run(coverUrl, comicId);
+  invalidateComicReviewOnEdit(comicId);
 
   const updated = db.prepare('SELECT * FROM comics WHERE id = ?').get(comicId);
   updated.price = updated.price_cents ? (updated.price_cents / 100).toFixed(2) : null;
@@ -2664,12 +2691,19 @@ app.post('/api/comics/:id/publish', requireAuth, requireVerified, (req, res) => 
   res.json({ success: true, status: 'published' });
 });
 
-// Creator unpublish: remove from Browse → back to draft (must re-submit for review to go live again)
+// Unpublish: remove from Browse → draft (must Submit for Review again to republish).
+// Owner: own story. Admin: any story.
 app.post('/api/comics/:id/unpublish', requireAuth, requireVerified, (req, res) => {
   const comicId = req.params.id;
   const comic = db.prepare('SELECT * FROM comics WHERE id = ?').get(comicId);
-  if (!comic || !sameUserId(comic.user_id, req.session.userId)) {
-    return res.status(403).json({ error: 'Not your comic' });
+  if (!comic) {
+    return res.status(404).json({ error: 'Story not found' });
+  }
+  const user = getCurrentUser(req);
+  const isOwner = sameUserId(comic.user_id, req.session.userId);
+  const isAdmin = user && user.role === 'admin';
+  if (!isOwner && !isAdmin) {
+    return res.status(403).json({ error: 'Not allowed to unpublish this story' });
   }
   if (comic.status !== 'published') {
     return res.status(400).json({ error: 'Only published stories can be unpublished' });
@@ -2684,58 +2718,25 @@ app.post('/api/comics/:id/unpublish', requireAuth, requireVerified, (req, res) =
   res.json({ success: true, status: 'draft' });
 });
 
-// Admin-only hard delete (pages, choices, files, related rows)
-app.delete('/api/comics/:id', requireAuth, requireAdmin, (req, res) => {
+// Admin soft-remove: quarantine (off Browse). Purchasers / unlocks keep access.
+app.post('/api/comics/:id/admin-remove', requireAuth, requireAdmin, (req, res) => {
   const comicId = Number(req.params.id);
   const comic = db.prepare('SELECT * FROM comics WHERE id = ?').get(comicId);
   if (!comic) {
     return res.status(404).json({ error: 'Story not found' });
   }
+  const note = String(req.body?.notes || 'Removed from Browse by admin. Purchasers retain access. Fix issues and re-submit for review if appropriate.')
+    .slice(0, 2000);
+  quarantineComic(comicId, note);
+  res.json({ success: true, status: 'quarantined' });
+});
 
-  try {
-    tryDeleteUploadUrl(comic.cover_image);
-
-    const pages = db.prepare('SELECT id, image_path FROM pages WHERE comic_id = ?').all(comicId);
-    const pageIds = pages.map((p) => p.id);
-    pages.forEach((p) => tryDeleteUploadUrl(p.image_path));
-
-    if (pageIds.length) {
-      const placeholders = pageIds.map(() => '?').join(',');
-      const choiceImgs = db.prepare(
-        `SELECT choice_image FROM choices WHERE from_page_id IN (${placeholders}) AND choice_image IS NOT NULL`
-      ).all(...pageIds);
-      choiceImgs.forEach((row) => tryDeleteUploadUrl(row.choice_image));
-      db.prepare(`DELETE FROM choices WHERE from_page_id IN (${placeholders})`).run(...pageIds);
-      db.prepare(`DELETE FROM choices WHERE to_page_id IN (${placeholders})`).run(...pageIds);
-    }
-
-    db.prepare('DELETE FROM pages WHERE comic_id = ?').run(comicId);
-    try { db.prepare('DELETE FROM chapters WHERE comic_id = ?').run(comicId); } catch (_) {}
-    try { db.prepare('DELETE FROM purchases WHERE comic_id = ?').run(comicId); } catch (_) {}
-    try { db.prepare('DELETE FROM comic_sample_uses WHERE comic_id = ?').run(comicId); } catch (_) {}
-    try { db.prepare('DELETE FROM library_saves WHERE comic_id = ?').run(comicId); } catch (_) {}
-    try { db.prepare('DELETE FROM reading_history WHERE comic_id = ?').run(comicId); } catch (_) {}
-    try { db.prepare('DELETE FROM story_ratings WHERE comic_id = ?').run(comicId); } catch (_) {}
-    try { db.prepare('DELETE FROM story_comments WHERE comic_id = ?').run(comicId); } catch (_) {}
-    try { db.prepare('DELETE FROM chapter_unlocks WHERE comic_id = ?').run(comicId); } catch (_) {}
-    // Keep creator_earnings history rows for payouts/audit (comic_id may become orphaned — null out if column allows)
-    try { db.prepare('UPDATE creator_earnings SET comic_id = NULL WHERE comic_id = ?').run(comicId); } catch (_) {}
-
-    db.prepare('DELETE FROM comics WHERE id = ?').run(comicId);
-
-    // Best-effort remove comic upload folder
-    try {
-      const dir = path.join(__dirname, 'uploads', 'comics', String(comicId));
-      if (fs.existsSync(dir)) fs.rmSync(dir, { recursive: true, force: true });
-    } catch (e) {
-      console.warn('Comic folder cleanup:', e.message);
-    }
-
-    res.json({ success: true, deleted: comicId });
-  } catch (err) {
-    console.error('Admin delete comic failed:', err);
-    res.status(500).json({ error: 'Failed to delete story' });
-  }
+// Legacy hard-delete route disabled — use admin-remove (quarantine) instead
+app.delete('/api/comics/:id', requireAuth, requireAdmin, (req, res) => {
+  return res.status(400).json({
+    error: 'Hard delete is disabled. Use Remove from Browse (quarantine) so purchasers keep access.',
+    code: 'USE_ADMIN_REMOVE',
+  });
 });
 
 // === END REVIEW WORKFLOW ===
@@ -2828,6 +2829,7 @@ app.post('/api/comics/:comicId/pages', requireAuth, requireVerified, uploadSingl
         .run(comicId, result.lastInsertRowid);
     }
 
+    invalidateComicReviewOnEdit(comicId);
     const page = db.prepare('SELECT * FROM pages WHERE id = ?').get(result.lastInsertRowid);
     res.status(201).json(page);
   } catch (err) {
@@ -2891,6 +2893,7 @@ app.post('/api/comics/:comicId/pages/bulk', requireAuth, requireVerified, upload
       inserted.push(newPage);
     }
 
+    if (inserted.length) invalidateComicReviewOnEdit(comicId);
     res.status(201).json({ pages: inserted, count: inserted.length });
   } catch (err) {
     console.error('Bulk page upload failed:', err);
@@ -2935,6 +2938,7 @@ app.post('/api/pages/:pageId', requireAuth, requireVerified, uploadSingle('image
     SET title = ?, image_path = ?, text_content = ?
     WHERE id = ?
   `).run(titleCheck.text, imagePath, textCheck.text, pageId);
+  invalidateComicReviewOnEdit(page.comic_id);
 
   const updated = db.prepare('SELECT * FROM pages WHERE id = ?').get(pageId);
   res.json(updated);
@@ -2986,6 +2990,7 @@ app.post('/api/pages/:pageId/choices', requireAuth, requireVerified, resolveComi
     INSERT INTO choices (from_page_id, choice_text, to_page_id, choice_image)
     VALUES (?, ?, ?, ?)
   `).run(fromPageId, labelCheck.text, to_page_id, choiceImage);
+  invalidateComicReviewOnEdit(fromPage.comic_id);
 
   res.status(201).json({ 
     id: result.lastInsertRowid, 
@@ -3008,6 +3013,7 @@ app.delete('/api/pages/:pageId', requireAuth, (req, res) => {
   }
 
   db.prepare('DELETE FROM pages WHERE id = ?').run(req.params.pageId);
+  invalidateComicReviewOnEdit(page.comic_id);
   res.json({ success: true });
 });
 
@@ -3028,6 +3034,7 @@ app.post('/api/pages/:pageId/set-start', requireAuth, requireVerified, (req, res
   db.prepare('UPDATE pages SET is_start = 0 WHERE comic_id = ?').run(page.comic_id);
   // Set this one
   db.prepare('UPDATE pages SET is_start = 1 WHERE id = ?').run(pageId);
+  invalidateComicReviewOnEdit(page.comic_id);
 
   res.json({ success: true });
 });
@@ -3105,6 +3112,7 @@ app.post('/api/pages/:pageId/set-choices', requireAuth, requireVerified, (req, r
     });
   }
 
+  invalidateComicReviewOnEdit(comicId);
   res.json({ success: true, choices: saved });
 });
 
@@ -3151,6 +3159,7 @@ app.post('/api/pages/:pageId/choice-labels', requireAuth, requireVerified, (req,
     updated.push({ id: row.id, text: row.text });
   }
 
+  invalidateComicReviewOnEdit(fromPage.comic_id);
   res.json({ success: true, choices: updated });
 });
 
