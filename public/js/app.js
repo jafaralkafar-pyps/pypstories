@@ -1082,6 +1082,9 @@
             ${ status === 'approved' ? `
               <button class="flex-1 py-2 bg-green-600 hover:bg-green-500 rounded-2xl text-xs sm:text-sm text-white" data-action="publish">Publish</button>
             ` : ''}
+            ${ status === 'published' ? `
+              <button class="flex-1 py-2 border border-amber-700/70 text-amber-200 hover:bg-amber-950/40 rounded-2xl text-xs sm:text-sm" data-action="unpublish">Unpublish</button>
+            ` : ''}
           </div>
         `;
         div.dataset.comicId = comic.id;
@@ -1275,6 +1278,9 @@
               <button class="flex-1 py-2 bg-amber-600 hover:bg-amber-500 rounded-2xl text-xs sm:text-sm text-white" data-action="changes">Request Changes</button>
             ` : ''}
             <button class="flex-1 py-2 border border-slate-700 hover:bg-slate-800 rounded-2xl text-xs sm:text-sm" data-action="view">View</button>
+            ${currentUser.role === 'admin' ? `
+              <button class="flex-1 py-2 border border-red-800 text-red-300 hover:bg-red-950/50 rounded-2xl text-xs sm:text-sm" data-action="delete">Delete</button>
+            ` : ''}
           </div>
         `;
         div.dataset.comicId = story.id;
@@ -1313,6 +1319,22 @@
             showAdminReviews();
           } else if (action === 'view') {
             openReader(id);
+          } else if (action === 'delete') {
+            if (currentUser.role !== 'admin') return;
+            if (!confirm('ADMIN: Permanently delete this story and its pages/images? This cannot be undone.')) return;
+            if (!confirm('Really delete? Purchases and unlocks for this story will also be removed.')) return;
+            try {
+              const r = await fetch(`/api/comics/${id}`, { method: 'DELETE' });
+              const data = await r.json().catch(() => ({}));
+              if (!r.ok) {
+                alert(data.error || 'Delete failed');
+                return;
+              }
+              alert('Story deleted.');
+              showAdminReviews();
+            } catch (e) {
+              alert('Delete failed');
+            }
           }
         };
       });
@@ -3217,8 +3239,37 @@
       const sampleBtn = document.getElementById('info-read-sample-btn');
       const purchaseBtn = document.getElementById('info-purchase-btn');
       const saveBtn = document.getElementById('info-library-save-btn');
+      const adminDeleteBtn = document.getElementById('info-admin-delete-btn');
       const tip = document.getElementById('info-sample-tip');
       const creditBalEl = document.getElementById('info-credit-balance');
+      if (adminDeleteBtn) {
+        if (currentUser && currentUser.role === 'admin') {
+          adminDeleteBtn.classList.remove('hidden');
+          adminDeleteBtn.onclick = async () => {
+            if (!confirm('ADMIN: Permanently delete this story and its pages/images? This cannot be undone.')) return;
+            if (!confirm('Really delete? Purchases and unlocks for this story will also be removed.')) return;
+            try {
+              const r = await fetch(`/api/comics/${comicId}`, { method: 'DELETE' });
+              const data = await r.json().catch(() => ({}));
+              if (!r.ok) {
+                alert(data.error || 'Delete failed');
+                return;
+              }
+              closeComicInfo();
+              alert('Story deleted.');
+              if (typeof loadComics === 'function') loadComics();
+              if (typeof showMyComics === 'function' && !document.getElementById('view-my-comics')?.classList.contains('hidden')) {
+                showMyComics();
+              }
+            } catch (e) {
+              alert('Delete failed');
+            }
+          };
+        } else {
+          adminDeleteBtn.classList.add('hidden');
+          adminDeleteBtn.onclick = null;
+        }
+      }
       if (creditBalEl) {
         if (currentUser) {
           creditBalEl.classList.remove('hidden');
@@ -3910,6 +3961,22 @@
                   showMyComics();
                 })
                 .catch(() => alert('Could not publish story.'));
+            } else if (actionBtn.dataset.action === 'unpublish') {
+              if (!confirm('Unpublish this story? It will leave Browse and return to Draft. You must Submit for Review again to republish.')) {
+                return;
+              }
+              fetch(`/api/comics/${id}/unpublish`, { method: 'POST' })
+                .then(async (r) => {
+                  const data = await r.json().catch(() => ({}));
+                  if (!r.ok) {
+                    alert(data.error || 'Could not unpublish story.');
+                    showMyComics();
+                    return;
+                  }
+                  alert('Story unpublished. It is now a Draft.');
+                  showMyComics();
+                })
+                .catch(() => alert('Could not unpublish story.'));
             }
           } else {
             // click on card body -> edit

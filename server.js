@@ -868,6 +868,33 @@ function requireEditor(req, res, next) {
   return res.status(403).json({ error: 'Editor or admin access required' });
 }
 
+function requireAdmin(req, res, next) {
+  const user = getCurrentUser(req);
+  if (user && user.role === 'admin') {
+    return next();
+  }
+  return res.status(403).json({ error: 'Admin access required' });
+}
+
+/** Best-effort remove local upload files referenced by a public /uploads/... URL. */
+function tryDeleteUploadUrl(url) {
+  if (!url || typeof url !== 'string') return;
+  try {
+    let pathname = url;
+    if (url.startsWith('http://') || url.startsWith('https://')) {
+      pathname = new URL(url).pathname;
+    }
+    if (!pathname.startsWith('/uploads/')) return;
+    const rel = pathname.replace(/^\/uploads\//, '');
+    const full = path.join(__dirname, 'uploads', rel);
+    const uploadsRoot = path.join(__dirname, 'uploads');
+    if (!full.startsWith(uploadsRoot)) return;
+    if (fs.existsSync(full)) fs.unlinkSync(full);
+  } catch (e) {
+    console.warn('Upload cleanup skipped:', e.message);
+  }
+}
+
 function userHasFullAccess(userId, comicId) {
   if (userId == null || comicId == null) return false;
   const comic = db.prepare('SELECT user_id, reviewed_by, status FROM comics WHERE id = ?').get(comicId);
@@ -2635,6 +2662,80 @@ app.post('/api/comics/:id/publish', requireAuth, requireVerified, (req, res) => 
 
   db.prepare(`UPDATE comics SET status = 'published' WHERE id = ?`).run(comicId);
   res.json({ success: true, status: 'published' });
+});
+
+// Creator unpublish: remove from Browse → back to draft (must re-submit for review to go live again)
+app.post('/api/comics/:id/unpublish', requireAuth, requireVerified, (req, res) => {
+  const comicId = req.params.id;
+  const comic = db.prepare('SELECT * FROM comics WHERE id = ?').get(comicId);
+  if (!comic || !sameUserId(comic.user_id, req.session.userId)) {
+    return res.status(403).json({ error: 'Not your comic' });
+  }
+  if (comic.status !== 'published') {
+    return res.status(400).json({ error: 'Only published stories can be unpublished' });
+  }
+  db.prepare(`
+    UPDATE comics
+    SET status = 'draft',
+        reviewed_by = NULL,
+        review_notes = NULL
+    WHERE id = ?
+  `).run(comicId);
+  res.json({ success: true, status: 'draft' });
+});
+
+// Admin-only hard delete (pages, choices, files, related rows)
+app.delete('/api/comics/:id', requireAuth, requireAdmin, (req, res) => {
+  const comicId = Number(req.params.id);
+  const comic = db.prepare('SELECT * FROM comics WHERE id = ?').get(comicId);
+  if (!comic) {
+    return res.status(404).json({ error: 'Story not found' });
+  }
+
+  try {
+    tryDeleteUploadUrl(comic.cover_image);
+
+    const pages = db.prepare('SELECT id, image_path FROM pages WHERE comic_id = ?').all(comicId);
+    const pageIds = pages.map((p) => p.id);
+    pages.forEach((p) => tryDeleteUploadUrl(p.image_path));
+
+    if (pageIds.length) {
+      const placeholders = pageIds.map(() => '?').join(',');
+      const choiceImgs = db.prepare(
+        `SELECT choice_image FROM choices WHERE from_page_id IN (${placeholders}) AND choice_image IS NOT NULL`
+      ).all(...pageIds);
+      choiceImgs.forEach((row) => tryDeleteUploadUrl(row.choice_image));
+      db.prepare(`DELETE FROM choices WHERE from_page_id IN (${placeholders})`).run(...pageIds);
+      db.prepare(`DELETE FROM choices WHERE to_page_id IN (${placeholders})`).run(...pageIds);
+    }
+
+    db.prepare('DELETE FROM pages WHERE comic_id = ?').run(comicId);
+    try { db.prepare('DELETE FROM chapters WHERE comic_id = ?').run(comicId); } catch (_) {}
+    try { db.prepare('DELETE FROM purchases WHERE comic_id = ?').run(comicId); } catch (_) {}
+    try { db.prepare('DELETE FROM comic_sample_uses WHERE comic_id = ?').run(comicId); } catch (_) {}
+    try { db.prepare('DELETE FROM library_saves WHERE comic_id = ?').run(comicId); } catch (_) {}
+    try { db.prepare('DELETE FROM reading_history WHERE comic_id = ?').run(comicId); } catch (_) {}
+    try { db.prepare('DELETE FROM story_ratings WHERE comic_id = ?').run(comicId); } catch (_) {}
+    try { db.prepare('DELETE FROM story_comments WHERE comic_id = ?').run(comicId); } catch (_) {}
+    try { db.prepare('DELETE FROM chapter_unlocks WHERE comic_id = ?').run(comicId); } catch (_) {}
+    // Keep creator_earnings history rows for payouts/audit (comic_id may become orphaned — null out if column allows)
+    try { db.prepare('UPDATE creator_earnings SET comic_id = NULL WHERE comic_id = ?').run(comicId); } catch (_) {}
+
+    db.prepare('DELETE FROM comics WHERE id = ?').run(comicId);
+
+    // Best-effort remove comic upload folder
+    try {
+      const dir = path.join(__dirname, 'uploads', 'comics', String(comicId));
+      if (fs.existsSync(dir)) fs.rmSync(dir, { recursive: true, force: true });
+    } catch (e) {
+      console.warn('Comic folder cleanup:', e.message);
+    }
+
+    res.json({ success: true, deleted: comicId });
+  } catch (err) {
+    console.error('Admin delete comic failed:', err);
+    res.status(500).json({ error: 'Failed to delete story' });
+  }
 });
 
 // === END REVIEW WORKFLOW ===
