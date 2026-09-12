@@ -264,6 +264,46 @@
         max-width: 100%;
       }
     }
+
+    /* ——— Create / Edit Story: title + actions pinned; form scrolls (plain CSS; don't rely on Tailwind overflow) ——— */
+    #create-modal:not(.hidden) {
+      display: flex !important;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    #create-modal-panel {
+      display: flex;
+      flex-direction: column;
+      height: 100%;
+      min-height: 0;
+      overflow: hidden;
+      box-sizing: border-box;
+    }
+    #create-modal-title {
+      flex: 0 0 auto;
+    }
+    #create-form {
+      flex: 1 1 auto;
+      min-height: 0;
+      overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
+      overscroll-behavior: contain;
+    }
+    #create-form-actions {
+      flex: 0 0 auto;
+      padding-top: 0.75rem;
+      margin-top: 0.25rem;
+      border-top: 1px solid #334155;
+      background: #0f172a;
+    }
+    #editor-section {
+      flex: 1 1 auto;
+      min-height: 0;
+      overflow: hidden;
+    }
+    #editor-section.hidden {
+      display: none !important;
+    }
   </style>
 </head>
 <body class="bg-slate-950 text-slate-200">
@@ -692,10 +732,10 @@
   <!-- CREATE / EDIT COMIC MODAL -->
   <div id="create-modal" 
        class="hidden fixed top-14 sm:top-16 left-0 right-0 bottom-0 bg-black/80 z-40 flex flex-col overflow-hidden">
-    <div onclick="event.stopImmediatePropagation()" class="bg-slate-900 border border-slate-700 w-full h-full p-4 sm:p-6 flex flex-col min-h-0" style="height:100%;">
-      <h3 id="create-modal-title" class="text-2xl font-semibold tracking-tight mb-5">Create New Story</h3>
+    <div id="create-modal-panel" onclick="event.stopImmediatePropagation()" class="bg-slate-900 border border-slate-700 w-full h-full p-4 sm:p-6 flex flex-col min-h-0">
+      <h3 id="create-modal-title" class="text-2xl font-semibold tracking-tight mb-4">Create New Story</h3>
       
-      <div id="create-form" class="flex-1 overflow-y-auto min-h-0 pr-0.5">
+      <div id="create-form" class="pr-0.5 pb-2">
         <!-- Tutorial video + steps for new creators -->
         <div id="creator-tutorial"></div>
 
@@ -727,11 +767,11 @@
             <input id="comic-price" type="number" step="0.01" min="0" value="0" class="w-full mt-1 bg-slate-950 border border-slate-700 rounded-2xl px-4 py-2.5 text-sm">
           </div>
         </div>
+      </div>
 
-        <div class="flex flex-col sm:flex-row gap-3 mt-6">
-          <button onclick="closeCreateModal()" class="flex-1 py-2.5 border border-slate-700 rounded-2xl text-sm">Cancel</button>
-          <button onclick="createComic()" class="flex-1 py-2.5 bg-white text-slate-900 font-medium rounded-2xl">Create Story</button>
-        </div>
+      <div id="create-form-actions" class="flex flex-col sm:flex-row gap-3">
+        <button type="button" onclick="closeCreateModal()" class="flex-1 py-2.5 border border-slate-700 rounded-2xl text-sm">Cancel</button>
+        <button type="button" onclick="createComic()" class="flex-1 py-2.5 bg-white text-slate-900 font-medium rounded-2xl">Create Story</button>
       </div>
 
       <!-- Editor view inside modal (after story is created) -->

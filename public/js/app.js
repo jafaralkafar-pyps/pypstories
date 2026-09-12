@@ -136,6 +136,7 @@
         document.getElementById('reader-modal').classList.add('hidden');
         document.getElementById('create-modal').classList.remove('hidden');
         document.getElementById('create-form').classList.add('hidden');
+        document.getElementById('create-form-actions')?.classList.add('hidden');
         document.getElementById('editor-section').classList.remove('hidden');
         document.getElementById('navbar').classList.remove('hidden');
         return;
@@ -1364,6 +1365,7 @@
 
       document.getElementById('create-modal-title').textContent = 'Create New Story';
       document.getElementById('create-form').classList.remove('hidden');
+      document.getElementById('create-form-actions')?.classList.remove('hidden');
       document.getElementById('editor-section').classList.add('hidden');
       
       document.getElementById('comic-title').value = '';
@@ -1463,6 +1465,7 @@
         // Switch to editor
         editingComicId = comic.id;
         document.getElementById('create-form').classList.add('hidden');
+        document.getElementById('create-form-actions')?.classList.add('hidden');
         document.getElementById('editor-section').classList.remove('hidden');
         document.getElementById('create-modal-title').textContent = 'Edit Story';
 
@@ -1486,6 +1489,7 @@
 
       document.getElementById('create-modal-title').textContent = 'Edit Story';
       document.getElementById('create-form').classList.add('hidden');
+      document.getElementById('create-form-actions')?.classList.add('hidden');
       document.getElementById('editor-section').classList.remove('hidden');
       document.getElementById('create-modal').classList.remove('hidden');
       
