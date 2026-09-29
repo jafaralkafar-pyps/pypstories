@@ -604,10 +604,25 @@ function userHasChapterAccess(db, userId, chapterId) {
   return !!unlock;
 }
 
-const PAYOUT_RETRY_LIMIT_MS = 23 * 60 * 60 * 1000;
+const PAYOUT_RETRY_LIMIT_MS = 24 * 60 * 60 * 1000;
 
-function payoutIdempotencyKey(creatorId, earningIds) {
-  const raw = `${creatorId}:${earningIds.join(',')}`;
+const DEFINITE_STRIPE_FAILURES = new Set([
+  'StripeInvalidRequestError',
+  'StripeIdempotencyError',
+  'StripeCardError',
+  'StripePermissionError',
+  'StripeAuthenticationError',
+]);
+
+function isDefiniteStripeFailure(err) {
+  return !!(err && DEFINITE_STRIPE_FAILURES.has(err.type));
+}
+
+function payoutIdempotencyKey(creatorId, payoutId, earningIds) {
+  // payoutId is part of the key so a new claim after a definite failure does not
+  // reuse the key Stripe already answered. A retry of the same claim passes the
+  // same payoutId, so the key and the request body stay the same.
+  const raw = `${creatorId}:${payoutId}:${earningIds.join(',')}`;
   return 'payout-' + crypto.createHash('sha256').update(raw).digest('hex');
 }
 
@@ -642,6 +657,117 @@ function markEarningsPaid(db, earningIds, payoutId, transferId) {
       WHERE id IN (${placeholders}) AND status = 'processing'
     `).run(payoutId, ...earningIds);
   })();
+}
+
+function releasePayoutClaim(db, payoutId, earningIds) {
+  const placeholders = earningIds.map(() => '?').join(',');
+  db.transaction(() => {
+    db.prepare(`
+      UPDATE creator_earnings
+      SET status = 'available', payout_id = NULL
+      WHERE status = 'processing' AND payout_id = ? AND id IN (${placeholders})
+    `).run(payoutId, ...earningIds);
+    db.prepare(`
+      UPDATE creator_payouts SET status = 'failed'
+      WHERE id = ? AND stripe_transfer_id IS NULL
+    `).run(payoutId);
+  })();
+}
+
+function logPayoutNeedsReconcile(payoutId, creatorId, err) {
+  const kind = (err && (err.type || err.code)) || 'error';
+  console.error(
+    `Payout ${payoutId} for creator ${creatorId} left in processing. Stripe result is unknown (${kind}). Manual reconcile is needed.`
+  );
+}
+
+async function findTransferForPayout(stripe, creatorId, payoutId) {
+  const payoutIdStr = String(payoutId);
+  const creatorStr = String(creatorId);
+  const matches = (transfer) => transfer
+    && transfer.metadata
+    && String(transfer.metadata.payout_id) === payoutIdStr
+    && String(transfer.metadata.creator_id) === creatorStr;
+
+  if (stripe.transfers && typeof stripe.transfers.search === 'function') {
+    const result = await stripe.transfers.search({
+      query: `metadata['payout_id']:'${payoutIdStr}' AND metadata['creator_id']:'${creatorStr}'`,
+      limit: 5,
+    });
+    return (result.data || []).find(matches) || null;
+  }
+  if (stripe.transfers && typeof stripe.transfers.list === 'function') {
+    const result = await stripe.transfers.list({ limit: 100 });
+    return (result.data || []).find(matches) || null;
+  }
+  throw new Error('Stripe client cannot list transfers');
+}
+
+function listStuckPayouts(db) {
+  const payouts = db.prepare(`
+    SELECT id, creator_id, amount_cents, stripe_transfer_id, status, created_at
+    FROM creator_payouts
+    WHERE status = 'pending'
+      AND stripe_transfer_id IS NULL
+      AND created_at <= datetime('now', '-24 hours')
+    ORDER BY id ASC
+  `).all();
+  const earnings = db.prepare(`
+    SELECT e.id, e.creator_id, e.creator_cents, e.payout_id, e.status, e.created_at
+    FROM creator_earnings e
+    LEFT JOIN creator_payouts p ON p.id = e.payout_id
+    WHERE e.status = 'processing'
+      AND (
+        e.payout_id IS NULL
+        OR (
+          p.status = 'pending'
+          AND p.stripe_transfer_id IS NULL
+          AND p.created_at <= datetime('now', '-24 hours')
+        )
+      )
+    ORDER BY e.id ASC
+  `).all();
+  return { payouts, earnings };
+}
+
+async function reconcileStuckPayout(db, stripe, payoutId) {
+  if (!stripe) throw new Error('Payments not configured');
+  const payout = db.prepare('SELECT * FROM creator_payouts WHERE id = ?').get(payoutId);
+  if (!payout) throw new Error('Payout not found');
+  if (payout.status !== 'pending' || payout.stripe_transfer_id) {
+    throw new Error('Payout is not a pending unpaid claim');
+  }
+  if (payoutAgeMs(payout.created_at) < PAYOUT_RETRY_LIMIT_MS) {
+    throw new Error('Payout is newer than 24 hours. Leave it in processing until the Stripe result is known.');
+  }
+
+  const earnings = db.prepare(`
+    SELECT id FROM creator_earnings
+    WHERE payout_id = ? AND status = 'processing'
+    ORDER BY id ASC
+  `).all(payoutId);
+  const earningIds = sortedEarningIds(earnings);
+  const existing = await findTransferForPayout(stripe, payout.creator_id, payout.id);
+  if (existing) {
+    if (earningIds.length) markEarningsPaid(db, earningIds, payout.id, existing.id);
+    else {
+      db.prepare(`
+        UPDATE creator_payouts
+        SET stripe_transfer_id = ?, status = 'completed'
+        WHERE id = ? AND stripe_transfer_id IS NULL
+      `).run(existing.id, payout.id);
+    }
+    return { action: 'paid', payout_id: payout.id, transfer_id: existing.id, earnings: earningIds.length };
+  }
+
+  if (earningIds.length) releasePayoutClaim(db, payout.id, earningIds);
+  else {
+    db.prepare(`
+      UPDATE creator_payouts SET status = 'failed'
+      WHERE id = ? AND stripe_transfer_id IS NULL
+    `).run(payout.id);
+  }
+  return { action: 'released', payout_id: payout.id, earnings: earningIds.length };
 }
 
 async function requestPayout(db, stripe, creatorId) {
@@ -686,7 +812,7 @@ async function requestPayout(db, stripe, creatorId) {
       };
     }
     if (payoutAgeMs(payout.created_at) >= PAYOUT_RETRY_LIMIT_MS) {
-      throw new Error('A payout has been processing for more than 23 hours. Check the Stripe Dashboard before retrying so it is not paid twice.');
+      throw new Error('A payout has been processing for more than 24 hours. Reconcile it before retrying so it is not paid twice.');
     }
   } else {
     const available = db.prepare(`
@@ -720,34 +846,63 @@ async function requestPayout(db, stripe, creatorId) {
     claimedNow = true;
   }
 
-  const idempotencyKey = payoutIdempotencyKey(creatorId, earningIds);
+  // Same claim, same payout row: look up a transfer already stored under this
+  // payout id before creating another one. Read only.
+  if (!claimedNow) {
+    try {
+      const existing = await findTransferForPayout(stripe, creatorId, payoutId);
+      if (existing) {
+        markEarningsPaid(db, earningIds, payoutId, existing.id);
+        return {
+          already: true,
+          payout_id: payoutId,
+          amount_cents: total,
+          transfer_id: existing.id,
+        };
+      }
+    } catch (err) {
+      logPayoutNeedsReconcile(payoutId, creatorId, err);
+      throw err;
+    }
+  }
+
+  const idempotencyKey = payoutIdempotencyKey(creatorId, payoutId, earningIds);
+  const transferParams = {
+    amount: total,
+    currency: 'usd',
+    destination: user.stripe_account_id,
+    metadata: {
+      creator_id: String(creatorId),
+      payout_id: String(payoutId),
+    },
+  };
   let transfer;
   try {
-    transfer = await stripe.transfers.create({
-      amount: total,
-      currency: 'usd',
-      destination: user.stripe_account_id,
-      metadata: {
-        creator_id: String(creatorId),
-        payout_id: String(payoutId),
-      },
-    }, { idempotencyKey });
+    transfer = await stripe.transfers.create(transferParams, { idempotencyKey });
   } catch (err) {
-    // A rejected request did not create a transfer. Network failures stay
-    // locked as processing so the same idempotency key is reused.
-    if (claimedNow && err && err.type === 'StripeInvalidRequestError') {
-      const placeholders = earningIds.map(() => '?').join(',');
-      db.transaction(() => {
-        db.prepare(`
-          UPDATE creator_earnings
-          SET status = 'available', payout_id = NULL
-          WHERE status = 'processing' AND payout_id = ? AND id IN (${placeholders})
-        `).run(payoutId, ...earningIds);
-        db.prepare(`
-          UPDATE creator_payouts SET status = 'failed'
-          WHERE id = ? AND stripe_transfer_id IS NULL
-        `).run(payoutId);
-      })();
+    if (isDefiniteStripeFailure(err)) {
+      // This request did not create a transfer. Idempotency mismatches can still
+      // mean an earlier request with this payout id did, so check before releasing.
+      if (err.type === 'StripeIdempotencyError') {
+        try {
+          const existing = await findTransferForPayout(stripe, creatorId, payoutId);
+          if (existing) {
+            markEarningsPaid(db, earningIds, payoutId, existing.id);
+            return {
+              already: true,
+              payout_id: payoutId,
+              amount_cents: total,
+              transfer_id: existing.id,
+            };
+          }
+        } catch (lookupErr) {
+          logPayoutNeedsReconcile(payoutId, creatorId, lookupErr);
+          throw err;
+        }
+      }
+      releasePayoutClaim(db, payoutId, earningIds);
+    } else {
+      logPayoutNeedsReconcile(payoutId, creatorId, err);
     }
     throw err;
   }
@@ -781,5 +936,7 @@ module.exports = {
   reverseStripePayment,
   userHasChapterAccess,
   requestPayout,
+  listStuckPayouts,
+  reconcileStuckPayout,
   availableAtIso,
 };

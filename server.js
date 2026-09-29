@@ -1804,6 +1804,22 @@ app.post('/api/creator/payout', requireAuth, requireVerified, async (req, res) =
   }
 });
 
+// Explicit admin recovery for payouts stuck in processing. Does not run on its own
+// and does not create a Stripe transfer.
+app.get('/api/admin/payouts/stuck', requireAuth, requireAdmin, (req, res) => {
+  res.json(credits.listStuckPayouts(db));
+});
+
+app.post('/api/admin/payouts/:id/reconcile', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const result = await credits.reconcileStuckPayout(db, stripe, parseInt(req.params.id, 10));
+    res.json({ success: true, ...result });
+  } catch (e) {
+    console.error('Payout reconcile failed:', e.message || e);
+    res.status(400).json({ error: e.message || 'Reconcile failed' });
+  }
+});
+
 // Footer contact form
 app.post('/api/contact', contactLimiter, async (req, res) => {
   const name = String(req.body.name || '').trim().slice(0, 80);
