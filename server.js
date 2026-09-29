@@ -1367,7 +1367,6 @@ app.post('/api/create-checkout-session', requireAuth, async (req, res) => {
 
     const session = await stripe.checkout.sessions.create({
       mode: 'subscription',
-      payment_method_types: ['card'],
       customer: customerId,
       line_items: [
         {
@@ -1461,7 +1460,6 @@ app.post('/api/credits/topup', requireAuth, requireVerified, async (req, res) =>
   try {
     const session = await stripe.checkout.sessions.create({
       mode: 'payment',
-      payment_method_types: ['card'],
       customer_email: user.email,
       line_items: [{
         price_data: {
@@ -1578,7 +1576,6 @@ app.post('/api/comics/:id/purchase', requireAuth, async (req, res) => {
 
     const session = await stripe.checkout.sessions.create({
       mode: 'payment',
-      payment_method_types: ['card'],
       customer_email: user.email,
       line_items: [{
         price_data: {
