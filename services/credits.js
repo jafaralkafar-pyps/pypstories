@@ -181,7 +181,7 @@ function applyCreditDelta(db, userId, deltaCents, kind, meta = {}) {
 
   const current = row.credit_balance_cents || 0;
   const next = current + delta;
-  if (next < 0) throw new Error('Insufficient credits');
+  if (next < 0 && !meta.allowNegative) throw new Error('Insufficient credits');
 
   db.prepare('UPDATE users SET credit_balance_cents = ? WHERE id = ?').run(next, userId);
   db.prepare(`
@@ -296,6 +296,87 @@ function fulfillFullStoryPurchase(db, { buyerId, comicId, amountCents, paymentIn
     `).run(buyer, comicIdNum);
 
     return { ok: true, amount_cents: amount };
+  })();
+}
+
+/**
+ * Undo a Stripe charge in the local database.
+ * Full refunds and new disputes both call this. Partial refunds do not.
+ * Does not move money at Stripe: Connect destination charges are reversed by
+ * Stripe when the charge is refunded, and this function only fixes our rows.
+ * A later fulfill for the same PaymentIntent is ignored.
+ */
+function reverseStripePayment(db, paymentIntentId, reason) {
+  const pi = String(paymentIntentId || '').trim();
+  if (!pi) return { matched: false, reason: 'missing payment_intent' };
+
+  return db.transaction(() => {
+    const existing = db.prepare(`
+      SELECT id FROM payment_reversals WHERE stripe_payment_intent = ?
+    `).get(pi);
+    if (existing) return { matched: true, already: true, payment_intent: pi };
+
+    const details = {
+      matched: false,
+      already: false,
+      payment_intent: pi,
+      topup: null,
+      purchase: null,
+      earnings_reversed: 0,
+      earnings_already_paid_or_processing: 0,
+      shortfall_cents: 0,
+    };
+
+    const topup = db.prepare(`
+      SELECT user_id, delta_cents FROM credit_ledger
+      WHERE stripe_payment_intent = ? AND kind = 'topup'
+      ORDER BY id ASC LIMIT 1
+    `).get(pi);
+    if (topup) {
+      details.matched = true;
+      applyCreditDelta(db, topup.user_id, -topup.delta_cents, 'topup_reversal', {
+        stripe_payment_intent: pi,
+        note: String(reason || 'Payment reversed').slice(0, 500),
+        allowNegative: true,
+      });
+      const after = getBalance(db, topup.user_id);
+      details.topup = {
+        user_id: topup.user_id,
+        clawed_cents: topup.delta_cents,
+        balance_after: after,
+      };
+      if (after < 0) details.shortfall_cents = -after;
+    }
+
+    const purchase = db.prepare(`
+      SELECT id, user_id, comic_id, amount_paid_cents
+      FROM purchases WHERE stripe_payment_intent = ?
+    `).get(pi);
+    if (purchase) {
+      details.matched = true;
+      db.prepare('DELETE FROM purchases WHERE id = ?').run(purchase.id);
+      const earnings = db.prepare(`
+        SELECT id, status FROM creator_earnings
+        WHERE buyer_id = ? AND comic_id = ? AND source = 'stripe_full' AND status != 'reversed'
+      `).all(purchase.user_id, purchase.comic_id);
+      for (const earning of earnings) {
+        if (earning.status === 'paid' || earning.status === 'processing') {
+          details.earnings_already_paid_or_processing += 1;
+        }
+        db.prepare(`UPDATE creator_earnings SET status = 'reversed' WHERE id = ?`).run(earning.id);
+        details.earnings_reversed += 1;
+      }
+      details.purchase = {
+        user_id: purchase.user_id,
+        comic_id: purchase.comic_id,
+        amount_paid_cents: purchase.amount_paid_cents,
+      };
+    }
+
+    db.prepare(`
+      INSERT INTO payment_reversals (stripe_payment_intent, reason) VALUES (?, ?)
+    `).run(pi, String(reason || '').slice(0, 500));
+    return details;
   })();
 }
 
@@ -697,6 +778,7 @@ module.exports = {
   unlockChapterWithCredits,
   purchaseFullStoryWithCredits,
   fulfillFullStoryPurchase,
+  reverseStripePayment,
   userHasChapterAccess,
   requestPayout,
   availableAtIso,

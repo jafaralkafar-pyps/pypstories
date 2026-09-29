@@ -608,6 +608,54 @@ app.post('/api/webhook', express.raw({ type: 'application/json' }), (req, res) =
     }
   }
 
+  if (event.type === 'charge.refunded') {
+    const charge = event.data.object;
+    const pi = typeof charge.payment_intent === 'string'
+      ? charge.payment_intent
+      : charge.payment_intent?.id;
+    if (!charge.refunded) {
+      console.log(`Partial refund on charge ${charge.id} payment_intent=${pi || 'none'} amount_refunded=${charge.amount_refunded}. Purchase, credits, and creator earnings were left unchanged.`);
+    } else if (!pi) {
+      console.log(`Full refund on charge ${charge.id} has no payment_intent. Nothing reversed.`);
+    } else {
+      try {
+        const result = credits.reverseStripePayment(db, pi, `charge.refunded ${charge.id}`);
+        console.log(`charge.refunded ${charge.id} payment_intent=${pi} matched=${result.matched} already=${!!result.already} earnings_reversed=${result.earnings_reversed || 0} shortfall_cents=${result.shortfall_cents || 0}`);
+        if (result.earnings_already_paid_or_processing) {
+          console.log(`charge.refunded ${charge.id}: ${result.earnings_already_paid_or_processing} creator earning(s) were already paid or in a payout. Marked reversed in the database only. This handler does not create a Stripe transfer reversal.`);
+        }
+        if (result.shortfall_cents) {
+          console.log(`charge.refunded ${charge.id}: buyer credit balance is short ${result.shortfall_cents} cents because some of those credits were already spent.`);
+        }
+      } catch (e) {
+        console.error(`Refund reversal failed for charge ${charge.id}:`, e.message || e);
+        return res.status(500).send('Reversal failed');
+      }
+    }
+  }
+
+  if (event.type === 'charge.dispute.created') {
+    const dispute = event.data.object;
+    const pi = typeof dispute.payment_intent === 'string'
+      ? dispute.payment_intent
+      : dispute.payment_intent?.id;
+    if (!pi) {
+      console.log(`Dispute ${dispute.id} has no payment_intent. Nothing reversed.`);
+    } else {
+      try {
+        const result = credits.reverseStripePayment(db, pi, `charge.dispute.created ${dispute.id} reason=${dispute.reason || 'unknown'}`);
+        console.log(`charge.dispute.created ${dispute.id} payment_intent=${pi} reason=${dispute.reason || 'unknown'} amount=${dispute.amount} matched=${result.matched} already=${!!result.already} earnings_reversed=${result.earnings_reversed || 0}`);
+        console.log(`Dispute ${dispute.id}: purchase or credits were reversed. Winning the dispute does not restore them.`);
+        if (result.earnings_already_paid_or_processing) {
+          console.log(`Dispute ${dispute.id}: ${result.earnings_already_paid_or_processing} creator earning(s) were already paid or in a payout. Marked reversed in the database only. This handler does not create a Stripe transfer reversal.`);
+        }
+      } catch (e) {
+        console.error(`Dispute reversal failed for ${dispute.id}:`, e.message || e);
+        return res.status(500).send('Reversal failed');
+      }
+    }
+  }
+
   res.json({ received: true });
 });
 
