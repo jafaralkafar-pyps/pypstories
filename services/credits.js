@@ -3,6 +3,8 @@
  * Stripe is used only for top-ups; chapter/story spends are internal ledger moves.
  */
 
+const crypto = require('crypto');
+
 const CREDIT_MIN_TOPUP_CENTS = 500; // $5
 const CREDIT_BONUS_THRESHOLD_CENTS = 2000; // larger than $20 → 10% bonus
 const CREDIT_BONUS_RATE = 0.10;
@@ -370,7 +372,7 @@ function getEarningsSummary(db, creatorId) {
     GROUP BY status
   `).all(creatorId);
 
-  const summary = { pending: 0, available: 0, paid: 0 };
+  const summary = { pending: 0, available: 0, paid: 0, processing: 0 };
   for (const r of rows) {
     if (summary[r.status] !== undefined) summary[r.status] = r.total;
   }
@@ -521,6 +523,46 @@ function userHasChapterAccess(db, userId, chapterId) {
   return !!unlock;
 }
 
+const PAYOUT_RETRY_LIMIT_MS = 23 * 60 * 60 * 1000;
+
+function payoutIdempotencyKey(creatorId, earningIds) {
+  const raw = `${creatorId}:${earningIds.join(',')}`;
+  return 'payout-' + crypto.createHash('sha256').update(raw).digest('hex');
+}
+
+function payoutAgeMs(createdAt) {
+  if (!createdAt) return 0;
+  const text = String(createdAt);
+  const iso = text.includes('T') ? text : text.replace(' ', 'T') + 'Z';
+  const parsed = Date.parse(iso);
+  if (!Number.isFinite(parsed)) return 0;
+  return Date.now() - parsed;
+}
+
+function sortedEarningIds(rows) {
+  return rows.map((row) => row.id).sort((a, b) => a - b);
+}
+
+function markEarningsPaid(db, earningIds, payoutId, transferId) {
+  const placeholders = earningIds.map(() => '?').join(',');
+  db.transaction(() => {
+    if (transferId) {
+      db.prepare(`
+        UPDATE creator_payouts
+        SET stripe_transfer_id = ?, status = 'completed'
+        WHERE id = ?
+      `).run(transferId, payoutId);
+    } else {
+      db.prepare(`UPDATE creator_payouts SET status = 'completed' WHERE id = ?`).run(payoutId);
+    }
+    db.prepare(`
+      UPDATE creator_earnings
+      SET status = 'paid', paid_at = datetime('now'), payout_id = ?
+      WHERE id IN (${placeholders}) AND status = 'processing'
+    `).run(payoutId, ...earningIds);
+  })();
+}
+
 async function requestPayout(db, stripe, creatorId) {
   if (!stripe) throw new Error('Payments not configured');
 
@@ -530,42 +572,107 @@ async function requestPayout(db, stripe, creatorId) {
     throw new Error('Connect your Stripe account for payouts first');
   }
 
-  const available = db.prepare(`
-    SELECT id, creator_cents FROM creator_earnings
-    WHERE creator_id = ? AND status = 'available'
+  const processing = db.prepare(`
+    SELECT id, creator_cents, payout_id FROM creator_earnings
+    WHERE creator_id = ? AND status = 'processing'
+    ORDER BY id ASC
   `).all(creatorId);
 
-  const total = available.reduce((s, r) => s + r.creator_cents, 0);
-  if (total < PAYOUT_MIN_CENTS) {
-    throw new Error(`Payout requires at least $${(PAYOUT_MIN_CENTS / 100).toFixed(2)} available after the ${DISPUTE_WINDOW_DAYS}-day waiting period`);
+  let earningIds;
+  let total;
+  let payoutId;
+  let claimedNow = false;
+
+  if (processing.length) {
+    earningIds = sortedEarningIds(processing);
+    total = processing.reduce((sum, row) => sum + row.creator_cents, 0);
+    const payoutIds = [...new Set(processing.map((row) => row.payout_id).filter((id) => id != null))];
+    if (payoutIds.length !== 1) {
+      throw new Error('A payout is already in progress but its record is inconsistent. Check Stripe before retrying.');
+    }
+    payoutId = payoutIds[0];
+    const payout = db.prepare('SELECT * FROM creator_payouts WHERE id = ?').get(payoutId);
+    if (!payout) {
+      throw new Error('A payout is already in progress but its record is missing. Check Stripe before retrying.');
+    }
+    if (payout.stripe_transfer_id) {
+      markEarningsPaid(db, earningIds, payoutId);
+      return {
+        already: true,
+        payout_id: payoutId,
+        amount_cents: payout.amount_cents,
+        transfer_id: payout.stripe_transfer_id,
+      };
+    }
+    if (payoutAgeMs(payout.created_at) >= PAYOUT_RETRY_LIMIT_MS) {
+      throw new Error('A payout has been processing for more than 23 hours. Check the Stripe Dashboard before retrying so it is not paid twice.');
+    }
+  } else {
+    const available = db.prepare(`
+      SELECT id, creator_cents FROM creator_earnings
+      WHERE creator_id = ? AND status = 'available'
+      ORDER BY id ASC
+    `).all(creatorId);
+
+    total = available.reduce((sum, row) => sum + row.creator_cents, 0);
+    if (total < PAYOUT_MIN_CENTS) {
+      throw new Error(`Payout requires at least $${(PAYOUT_MIN_CENTS / 100).toFixed(2)} available after the ${DISPUTE_WINDOW_DAYS}-day waiting period`);
+    }
+    earningIds = sortedEarningIds(available);
+    payoutId = db.transaction(() => {
+      const payout = db.prepare(`
+        INSERT INTO creator_payouts (creator_id, amount_cents, stripe_transfer_id, status)
+        VALUES (?, ?, NULL, 'pending')
+      `).run(creatorId, total);
+      const newPayoutId = Number(payout.lastInsertRowid);
+      const placeholders = earningIds.map(() => '?').join(',');
+      const updated = db.prepare(`
+        UPDATE creator_earnings
+        SET status = 'processing', payout_id = ?
+        WHERE creator_id = ? AND status = 'available' AND id IN (${placeholders})
+      `).run(newPayoutId, creatorId, ...earningIds);
+      if (updated.changes !== earningIds.length) {
+        throw new Error('Payout rows changed; try again');
+      }
+      return newPayoutId;
+    })();
+    claimedNow = true;
   }
 
-  const transfer = await stripe.transfers.create({
-    amount: total,
-    currency: 'usd',
-    destination: user.stripe_account_id,
-    metadata: { creator_id: String(creatorId) },
-  });
+  const idempotencyKey = payoutIdempotencyKey(creatorId, earningIds);
+  let transfer;
+  try {
+    transfer = await stripe.transfers.create({
+      amount: total,
+      currency: 'usd',
+      destination: user.stripe_account_id,
+      metadata: {
+        creator_id: String(creatorId),
+        payout_id: String(payoutId),
+      },
+    }, { idempotencyKey });
+  } catch (err) {
+    // A rejected request did not create a transfer. Network failures stay
+    // locked as processing so the same idempotency key is reused.
+    if (claimedNow && err && err.type === 'StripeInvalidRequestError') {
+      const placeholders = earningIds.map(() => '?').join(',');
+      db.transaction(() => {
+        db.prepare(`
+          UPDATE creator_earnings
+          SET status = 'available', payout_id = NULL
+          WHERE status = 'processing' AND payout_id = ? AND id IN (${placeholders})
+        `).run(payoutId, ...earningIds);
+        db.prepare(`
+          UPDATE creator_payouts SET status = 'failed'
+          WHERE id = ? AND stripe_transfer_id IS NULL
+        `).run(payoutId);
+      })();
+    }
+    throw err;
+  }
 
-  const run = db.transaction(() => {
-    const payout = db.prepare(`
-      INSERT INTO creator_payouts (creator_id, amount_cents, stripe_transfer_id, status)
-      VALUES (?, ?, ?, 'completed')
-    `).run(creatorId, total, transfer.id);
-
-    const payoutId = payout.lastInsertRowid;
-    const ids = available.map(r => r.id);
-    const placeholders = ids.map(() => '?').join(',');
-    db.prepare(`
-      UPDATE creator_earnings
-      SET status = 'paid', paid_at = datetime('now'), payout_id = ?
-      WHERE id IN (${placeholders})
-    `).run(payoutId, ...ids);
-
-    return { payout_id: payoutId, amount_cents: total, transfer_id: transfer.id };
-  });
-
-  return run();
+  markEarningsPaid(db, earningIds, payoutId, transfer.id);
+  return { payout_id: payoutId, amount_cents: total, transfer_id: transfer.id };
 }
 
 module.exports = {

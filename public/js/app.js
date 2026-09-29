@@ -780,7 +780,7 @@
         if (earnRes.ok) {
           const earn = await earnRes.json();
           const s = earn.summary || {};
-          document.getElementById('account-earn-pending').textContent = `$${((s.pending || 0) / 100).toFixed(2)}`;
+          document.getElementById('account-earn-pending').textContent = `$${(((s.pending || 0) + (s.processing || 0)) / 100).toFixed(2)}`;
           document.getElementById('account-earn-available').textContent = `$${((s.available || 0) / 100).toFixed(2)}`;
           document.getElementById('account-earn-paid').textContent = `$${((s.paid || 0) / 100).toFixed(2)}`;
 
