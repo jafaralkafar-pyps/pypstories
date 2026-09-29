@@ -520,6 +520,53 @@ function resolveComicForChoice(req, res, next) {
   next();
 }
 
+// Grants credits or a story purchase from a paid Checkout Session.
+// Throws on a real failure so the webhook can return 500 and Stripe will retry.
+// Retries are safe: top-ups are unique per PaymentIntent, and purchases are
+// UNIQUE(user_id, comic_id). The creator-earning insert is skipped when that
+// stripe_full row already exists, and a leftover pending row is marked paid.
+function fulfillCheckoutSession(session) {
+  const meta = session.metadata || {};
+
+  if (meta.type === 'credit_topup' && meta.user_id) {
+    if (session.amount_total == null) throw new Error('Checkout session missing amount_total');
+    const pi = paymentIntentFromSession(session) || session.id;
+    const result = credits.grantTopup(db, parseInt(meta.user_id, 10), session.amount_total, pi);
+    if (result.reversed) {
+      console.log(`Credit top-up skipped; payment ${pi} was reversed`);
+    } else if (result.already) {
+      console.log(`Credit top-up already recorded for payment ${pi}`);
+    } else {
+      console.log(`Credit top-up user ${meta.user_id}: +${result.credits_granted} credits (paid ${session.amount_total})`);
+    }
+    return;
+  }
+
+  if (meta.type === 'full_story' && meta.comic_id && meta.buyer_id) {
+    if (session.amount_total == null) throw new Error('Checkout session missing amount_total');
+    const pi = paymentIntentFromSession(session);
+    const result = credits.fulfillFullStoryPurchase(db, {
+      buyerId: meta.buyer_id,
+      comicId: meta.comic_id,
+      amountCents: session.amount_total,
+      paymentIntent: pi,
+    });
+    if (result.reversed) {
+      console.log(`Full story purchase skipped; payment ${pi || session.id} was reversed`);
+    } else {
+      console.log(`Full story purchase user ${meta.buyer_id} comic ${meta.comic_id} paid ${session.amount_total}`);
+    }
+    return;
+  }
+
+  if (meta.userId) {
+    db.prepare(`
+      UPDATE users SET is_premium = 1, subscription_status = 'active' WHERE id = ?
+    `).run(meta.userId);
+    console.log(`User ${meta.userId} upgraded to premium`);
+  }
+}
+
 // Stripe webhook needs raw body — register before express.json()
 app.post('/api/webhook', express.raw({ type: 'application/json' }), (req, res) => {
   if (!stripe || !process.env.STRIPE_WEBHOOK_SECRET) {
@@ -531,69 +578,23 @@ app.post('/api/webhook', express.raw({ type: 'application/json' }), (req, res) =
   try {
     event = stripe.webhooks.constructEvent(req.body, sig, process.env.STRIPE_WEBHOOK_SECRET);
   } catch (err) {
-    console.error('Webhook signature verification failed', err);
+    console.error('Webhook signature verification failed:', err.message || err);
     return res.status(400).send(`Webhook Error: ${err.message}`);
   }
 
-  if (event.type === 'checkout.session.completed') {
+  if (event.type === 'checkout.session.completed' || event.type === 'checkout.session.async_payment_succeeded') {
     const session = event.data.object;
     const meta = session.metadata || {};
-
-    if (meta.type === 'credit_topup' && meta.user_id) {
+    const waitsForPayment = meta.type === 'credit_topup' || meta.type === 'full_story';
+    if (waitsForPayment && session.payment_status !== 'paid') {
+      console.log(`Checkout ${session.id} ${event.type} payment_status=${session.payment_status || 'missing'}; not fulfilling`);
+    } else {
       try {
-        const paid = parseInt(meta.package_cents || session.amount_total || 0, 10);
-        const pi = typeof session.payment_intent === 'string'
-          ? session.payment_intent
-          : session.payment_intent?.id;
-        const result = credits.grantTopup(db, parseInt(meta.user_id, 10), paid, pi || session.id);
-        console.log(`Credit top-up user ${meta.user_id}: +${result.credits_granted} credits`);
+        fulfillCheckoutSession(session);
       } catch (e) {
-        console.error('Credit top-up webhook failed:', e);
+        console.error(`Checkout fulfillment failed for ${session.id}:`, e.message || e);
+        return res.status(500).send('Fulfillment failed');
       }
-    } else if (meta.type === 'full_story' && meta.comic_id && meta.buyer_id) {
-      try {
-        const comicId = parseInt(meta.comic_id, 10);
-        const buyerId = parseInt(meta.buyer_id, 10);
-        const comic = db.prepare('SELECT * FROM comics WHERE id = ?').get(comicId);
-        if (comic) {
-          const pi = typeof session.payment_intent === 'string'
-            ? session.payment_intent
-            : session.payment_intent?.id;
-          db.prepare(`
-            INSERT OR IGNORE INTO purchases (user_id, comic_id, amount_paid_cents, stripe_payment_intent)
-            VALUES (?, ?, ?, ?)
-          `).run(buyerId, comicId, comic.price_cents || session.amount_total || 0, pi || null);
-
-          // Earnings already paid out via Connect application_fee on this charge —
-          // still record for reporting if not present
-          const existingEarn = db.prepare(`
-            SELECT id FROM creator_earnings
-            WHERE buyer_id = ? AND comic_id = ? AND source = 'stripe_full' LIMIT 1
-          `).get(buyerId, comicId);
-          if (!existingEarn) {
-            credits.recordCreatorEarning(db, {
-              creatorId: comic.user_id,
-              buyerId,
-              comicId,
-              grossCents: comic.price_cents || session.amount_total || 0,
-              source: 'stripe_full',
-            });
-            // Stripe already transferred to creator; mark as paid immediately for stripe_full
-            db.prepare(`
-              UPDATE creator_earnings
-              SET status = 'paid', paid_at = datetime('now')
-              WHERE buyer_id = ? AND comic_id = ? AND source = 'stripe_full' AND status = 'pending'
-            `).run(buyerId, comicId);
-          }
-        }
-      } catch (e) {
-        console.error('Full story purchase webhook failed:', e);
-      }
-    } else if (meta.userId) {
-      db.prepare(`
-        UPDATE users SET is_premium = 1, subscription_status = 'active' WHERE id = ?
-      `).run(meta.userId);
-      console.log(`User ${meta.userId} upgraded to premium`);
     }
   }
 
@@ -1460,14 +1461,18 @@ app.post('/api/credits/topup-complete', requireAuth, async (req, res) => {
     if (String(session.metadata.user_id) !== String(req.session.userId)) {
       return res.status(403).json({ error: 'Session does not belong to you' });
     }
-    const paid = parseInt(session.metadata.package_cents || session.amount_total || 0, 10);
-    const pi = typeof session.payment_intent === 'string'
-      ? session.payment_intent
-      : session.payment_intent?.id;
-    const result = credits.grantTopup(db, req.session.userId, paid, pi || session.id);
+    if (session.amount_total == null) {
+      return res.status(400).json({ error: 'Payment amount missing' });
+    }
+    const result = credits.grantTopup(
+      db,
+      req.session.userId,
+      session.amount_total,
+      paymentIntentFromSession(session) || session.id
+    );
     res.json({ success: true, ...result });
   } catch (e) {
-    console.error(e);
+    console.error('Top-up confirm failed:', e.message || e);
     res.status(500).json({ error: 'Could not complete top-up' });
   }
 });
