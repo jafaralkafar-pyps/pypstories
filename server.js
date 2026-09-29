@@ -1559,22 +1559,50 @@ app.post('/api/comics/:id/purchase', requireAuth, async (req, res) => {
   }
 });
 
-// Record successful purchase (success redirect fallback)
-app.post('/api/comics/:id/purchase-complete', requireAuth, (req, res) => {
-  const comicId = req.params.id;
-  const { payment_intent } = req.body;
+function paymentIntentFromSession(session) {
+  if (!session || !session.payment_intent) return null;
+  return typeof session.payment_intent === 'string'
+    ? session.payment_intent
+    : session.payment_intent.id || null;
+}
 
-  const comic = db.prepare('SELECT price_cents FROM comics WHERE id = ?').get(comicId);
-  if (!comic) return res.status(404).json({ error: 'Not found' });
-
+// Success-redirect fallback. The browser calls this after Checkout; it must
+// not grant access unless Stripe says this session was paid by this user.
+app.post('/api/comics/:id/purchase-complete', requireAuth, async (req, res) => {
+  const { session_id } = req.body || {};
+  if (!stripe || !session_id) {
+    return res.status(400).json({ error: 'session_id required' });
+  }
   try {
-    db.prepare(`
-      INSERT OR IGNORE INTO purchases (user_id, comic_id, amount_paid_cents, stripe_payment_intent)
-      VALUES (?, ?, ?, ?)
-    `).run(req.session.userId, comicId, comic.price_cents, payment_intent || null);
-    res.json({ success: true });
+    const session = await stripe.checkout.sessions.retrieve(session_id);
+    if (session.payment_status !== 'paid') {
+      return res.status(400).json({ error: 'Payment not completed' });
+    }
+    if (session.metadata?.type !== 'full_story') {
+      return res.status(400).json({ error: 'Not a story purchase session' });
+    }
+    if (String(session.metadata.buyer_id) !== String(req.session.userId)) {
+      return res.status(403).json({ error: 'Session does not belong to you' });
+    }
+    if (String(session.metadata.comic_id) !== String(req.params.id)) {
+      return res.status(400).json({ error: 'Session does not match this story' });
+    }
+    if (session.amount_total == null) {
+      return res.status(400).json({ error: 'Payment amount missing' });
+    }
+    const result = credits.fulfillFullStoryPurchase(db, {
+      buyerId: req.session.userId,
+      comicId: req.params.id,
+      amountCents: session.amount_total,
+      paymentIntent: paymentIntentFromSession(session),
+    });
+    if (result.reversed) {
+      return res.status(400).json({ error: 'This payment was refunded or disputed' });
+    }
+    res.json({ success: true, ...result });
   } catch (e) {
-    res.status(500).json({ error: 'Failed to record purchase' });
+    console.error('Purchase confirm failed:', e.message || e);
+    res.status(500).json({ error: 'Could not record purchase' });
   }
 });
 

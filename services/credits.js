@@ -111,7 +111,25 @@ function initCreditSchema(db) {
       created_at TEXT DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (creator_id) REFERENCES users(id) ON DELETE CASCADE
     );
+
+    CREATE TABLE IF NOT EXISTS payment_reversals (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      stripe_payment_intent TEXT NOT NULL UNIQUE,
+      reason TEXT,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
   `);
+
+  // One top-up grant per PaymentIntent, so a webhook retry cannot credit twice.
+  try {
+    db.exec(`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_credit_ledger_topup_pi
+      ON credit_ledger(stripe_payment_intent)
+      WHERE kind = 'topup' AND stripe_payment_intent IS NOT NULL
+    `);
+  } catch (e) {
+    console.error('Could not create top-up idempotency index:', e.message);
+  }
 }
 
 function getBalance(db, userId) {
@@ -189,8 +207,14 @@ function grantTopup(db, userId, paidCents, paymentIntent) {
     throw new Error('Top-up below minimum');
   }
 
-  // Idempotent: same payment intent only once
+  // Idempotent: same payment intent only once. A reversal wins over a late retry.
   if (paymentIntent) {
+    const reversed = db.prepare(`
+      SELECT 1 FROM payment_reversals WHERE stripe_payment_intent = ?
+    `).get(paymentIntent);
+    if (reversed) {
+      return { already: true, reversed: true, balance: getBalance(db, userId), ...info };
+    }
     const existing = db.prepare(`
       SELECT id FROM credit_ledger
       WHERE stripe_payment_intent = ? AND kind = 'topup'
@@ -204,12 +228,73 @@ function grantTopup(db, userId, paidCents, paymentIntent) {
     ? `Top-up $${(info.paid_cents / 100).toFixed(2)} + ${info.bonus_credits} bonus credits (10%)`
     : `Top-up $${(info.paid_cents / 100).toFixed(2)}`;
 
-  const balance = applyCreditDelta(db, userId, info.credits_granted, 'topup', {
-    stripe_payment_intent: paymentIntent || null,
-    note,
-  });
+  let balance;
+  try {
+    balance = applyCreditDelta(db, userId, info.credits_granted, 'topup', {
+      stripe_payment_intent: paymentIntent || null,
+      note,
+    });
+  } catch (e) {
+    if (paymentIntent && /UNIQUE/i.test(String(e.message || e))) {
+      return { already: true, balance: getBalance(db, userId), ...info };
+    }
+    throw e;
+  }
 
   return { already: false, balance, ...info };
+}
+
+/**
+ * Record a paid full-story Checkout. Idempotent via UNIQUE(user_id, comic_id)
+ * and one stripe_full earning per buyer+story. Uses the amount Stripe charged.
+ */
+function fulfillFullStoryPurchase(db, { buyerId, comicId, amountCents, paymentIntent }) {
+  const buyer = parseInt(buyerId, 10);
+  const comicIdNum = parseInt(comicId, 10);
+  const amount = Math.round(Number(amountCents));
+  if (!buyer || !comicIdNum) throw new Error('Missing buyer or story');
+  if (!Number.isFinite(amount) || amount <= 0) throw new Error('Missing amount_total');
+
+  const pi = paymentIntent || null;
+  const comic = db.prepare('SELECT * FROM comics WHERE id = ?').get(comicIdNum);
+  if (!comic) throw new Error('Story not found');
+
+  return db.transaction(() => {
+    if (pi) {
+      const reversed = db.prepare(`
+        SELECT 1 FROM payment_reversals WHERE stripe_payment_intent = ?
+      `).get(pi);
+      if (reversed) return { reversed: true };
+    }
+
+    db.prepare(`
+      INSERT OR IGNORE INTO purchases (user_id, comic_id, amount_paid_cents, stripe_payment_intent)
+      VALUES (?, ?, ?, ?)
+    `).run(buyer, comicIdNum, amount, pi);
+
+    const existingEarn = db.prepare(`
+      SELECT id FROM creator_earnings
+      WHERE buyer_id = ? AND comic_id = ? AND source = 'stripe_full' LIMIT 1
+    `).get(buyer, comicIdNum);
+    if (!existingEarn) {
+      recordCreatorEarning(db, {
+        creatorId: comic.user_id,
+        buyerId: buyer,
+        comicId: comicIdNum,
+        grossCents: amount,
+        source: 'stripe_full',
+      });
+    }
+    // Connect already moved the creator share on this charge. A retry finishes
+    // this update if the first attempt recorded the earning and then failed.
+    db.prepare(`
+      UPDATE creator_earnings
+      SET status = 'paid', paid_at = COALESCE(paid_at, datetime('now'))
+      WHERE buyer_id = ? AND comic_id = ? AND source = 'stripe_full' AND status = 'pending'
+    `).run(buyer, comicIdNum);
+
+    return { ok: true, amount_cents: amount };
+  })();
 }
 
 function availableAtIso(fromDate = new Date()) {
@@ -504,6 +589,7 @@ module.exports = {
   getEarningsSummary,
   unlockChapterWithCredits,
   purchaseFullStoryWithCredits,
+  fulfillFullStoryPurchase,
   userHasChapterAccess,
   requestPayout,
   availableAtIso,

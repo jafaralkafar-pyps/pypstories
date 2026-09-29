@@ -3927,19 +3927,37 @@
         window.history.replaceState({}, document.title, window.location.pathname);
       }
 
-      // Handle successful full-story purchase redirect
+      // Handle successful full-story purchase redirect. Checkout puts session_id
+      // on the URL; access is granted only after Stripe confirms that session.
       const purchasedComic = urlParams.get('purchased');
       if (purchasedComic && currentUser) {
-        fetch(`/api/comics/${purchasedComic}/purchase-complete`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ payment_intent: urlParams.get('payment_intent') })
-        }).then(() => {
+        const sessionId = urlParams.get('session_id');
+        const clearPurchaseParams = () => {
           window.history.replaceState({}, document.title, window.location.pathname);
-          hasPurchasedComic = true;
-          alert('Thank you! You can now read the full story.');
-          if (currentReaderPage) renderReaderPage(currentReaderPage);
-        });
+        };
+        if (!sessionId) {
+          clearPurchaseParams();
+          alert('Could not confirm this purchase. If you were charged, contact support.');
+        } else {
+          fetch(`/api/comics/${purchasedComic}/purchase-complete`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ session_id: sessionId })
+          }).then(async (r) => {
+            const d = await r.json().catch(() => ({}));
+            clearPurchaseParams();
+            if (!r.ok) {
+              alert(d.error || 'Could not confirm this purchase. If you were charged, contact support.');
+              return;
+            }
+            hasPurchasedComic = true;
+            alert('Thank you! You can now read the full story.');
+            if (currentReaderPage) renderReaderPage(currentReaderPage);
+          }).catch(() => {
+            clearPurchaseParams();
+            alert('Could not confirm this purchase. If you were charged, contact support.');
+          });
+        }
       }
 
       // Event delegation for browse comic cards (safer than per-card closures)
