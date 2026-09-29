@@ -614,8 +614,55 @@ const DEFINITE_STRIPE_FAILURES = new Set([
   'StripeAuthenticationError',
 ]);
 
+const PAYOUT_PROCESSING_MESSAGE = 'Your payout is being confirmed with Stripe. Please do not retry; we will resolve it.';
+const PAYOUT_DEFINITE_FAILURE_MESSAGE = 'Payout could not be completed. Please try again later or contact support.';
+const PAYOUT_LIST_LOOKBACK_SEC = 60 * 60;
+
+// StripeRateLimitError (HTTP 429) is intentionally not in DEFINITE_STRIPE_FAILURES.
+// A 429 is retry-safe with the same idempotency key: Stripe did not apply a second
+// transfer, and a later request with that key returns the original result.
+// HTTP 409 (the key is still in use) is the same, even when the SDK reports it as
+// an idempotency error. Network errors, timeouts, and 5xx are unknown too.
 function isDefiniteStripeFailure(err) {
-  return !!(err && DEFINITE_STRIPE_FAILURES.has(err.type));
+  if (!err || err.payoutOutcome === 'unknown') return false;
+  if (!DEFINITE_STRIPE_FAILURES.has(err.type)) return false;
+  if (Number(err.statusCode) === 409 || Number(err.statusCode) === 429) return false;
+  if (err.code === 'idempotency_key_in_use') return false;
+  return true;
+}
+
+function isUnknownPayoutOutcome(err) {
+  if (!err) return false;
+  if (err.payoutOutcome === 'unknown') return true;
+  if (isDefiniteStripeFailure(err)) return false;
+  if (err.type === 'StripeRateLimitError' || err.type === 'StripeConnectionError' || err.type === 'StripeAPIError') {
+    return true;
+  }
+  const status = Number(err.statusCode);
+  if (status === 409 || status === 429 || status >= 500) return true;
+  const code = String(err.code || '');
+  return ['ETIMEDOUT', 'ESOCKETTIMEDOUT', 'ECONNRESET', 'ECONNABORTED', 'EAI_AGAIN', 'ENOTFOUND', 'ECONNREFUSED'].includes(code);
+}
+
+function payoutClientError(err) {
+  if (isUnknownPayoutOutcome(err)) {
+    return {
+      httpStatus: 202,
+      body: { status: 'processing', message: PAYOUT_PROCESSING_MESSAGE },
+    };
+  }
+  if (isDefiniteStripeFailure(err)) {
+    return {
+      httpStatus: 400,
+      body: { error: PAYOUT_DEFINITE_FAILURE_MESSAGE },
+    };
+  }
+  return null;
+}
+
+function markUnknownOutcome(err) {
+  if (err && typeof err === 'object') err.payoutOutcome = 'unknown';
+  return err;
 }
 
 function payoutIdempotencyKey(creatorId, payoutId, earningIds) {
@@ -626,11 +673,15 @@ function payoutIdempotencyKey(creatorId, payoutId, earningIds) {
   return 'payout-' + crypto.createHash('sha256').update(raw).digest('hex');
 }
 
-function payoutAgeMs(createdAt) {
-  if (!createdAt) return 0;
+function payoutCreatedMs(createdAt) {
+  if (!createdAt) return NaN;
   const text = String(createdAt);
   const iso = text.includes('T') ? text : text.replace(' ', 'T') + 'Z';
-  const parsed = Date.parse(iso);
+  return Date.parse(iso);
+}
+
+function payoutAgeMs(createdAt) {
+  const parsed = payoutCreatedMs(createdAt);
   if (!Number.isFinite(parsed)) return 0;
   return Date.now() - parsed;
 }
@@ -681,26 +732,54 @@ function logPayoutNeedsReconcile(payoutId, creatorId, err) {
   );
 }
 
-async function findTransferForPayout(stripe, creatorId, payoutId) {
-  const payoutIdStr = String(payoutId);
-  const creatorStr = String(creatorId);
-  const matches = (transfer) => transfer
+function transferMatchesPayout(transfer, creatorId, payoutId) {
+  return !!(transfer
     && transfer.metadata
-    && String(transfer.metadata.payout_id) === payoutIdStr
-    && String(transfer.metadata.creator_id) === creatorStr;
+    && String(transfer.metadata.payout_id) === String(payoutId)
+    && String(transfer.metadata.creator_id) === String(creatorId));
+}
 
-  if (stripe.transfers && typeof stripe.transfers.search === 'function') {
-    const result = await stripe.transfers.search({
-      query: `metadata['payout_id']:'${payoutIdStr}' AND metadata['creator_id']:'${creatorStr}'`,
-      limit: 5,
+// stripe 22 has no transfers.search. List this connected account from an hour
+// before the claim, and page through every result. Metadata identifies the
+// payout, including transfers created before this lookup existed.
+// null means the list finished with no match. A throw means the list did not
+// finish; callers must leave the claim unchanged.
+async function findTransferForPayout(stripe, lookup) {
+  if (!stripe || !stripe.transfers || typeof stripe.transfers.list !== 'function') {
+    throw new Error('Stripe client cannot list transfers');
+  }
+  const destination = lookup && lookup.destination;
+  if (!destination) throw new Error('Payout destination is missing');
+  const createdMs = payoutCreatedMs(lookup.createdAt);
+  if (!Number.isFinite(createdMs)) throw new Error('Payout created_at is missing');
+  const createdGte = Math.floor(createdMs / 1000) - PAYOUT_LIST_LOOKBACK_SEC;
+
+  const pending = stripe.transfers.list({
+    destination: String(destination),
+    created: { gte: createdGte },
+    limit: 100,
+  });
+  const matches = (transfer) => transferMatchesPayout(transfer, lookup.creatorId, lookup.payoutId);
+
+  // The SDK attaches the async iterator to the list promise itself. Awaiting
+  // it first would leave only the newest page in .data.
+  if (pending && typeof pending[Symbol.asyncIterator] === 'function') {
+    for await (const transfer of pending) {
+      if (matches(transfer)) return transfer;
+    }
+    return null;
+  }
+  if (pending && typeof pending.autoPagingEach === 'function') {
+    let found = null;
+    await pending.autoPagingEach(async (transfer) => {
+      if (matches(transfer)) {
+        found = transfer;
+        return false;
+      }
     });
-    return (result.data || []).find(matches) || null;
+    return found;
   }
-  if (stripe.transfers && typeof stripe.transfers.list === 'function') {
-    const result = await stripe.transfers.list({ limit: 100 });
-    return (result.data || []).find(matches) || null;
-  }
-  throw new Error('Stripe client cannot list transfers');
+  throw new Error('Stripe transfer list did not paginate');
 }
 
 function listStuckPayouts(db) {
@@ -747,7 +826,19 @@ async function reconcileStuckPayout(db, stripe, payoutId) {
     ORDER BY id ASC
   `).all(payoutId);
   const earningIds = sortedEarningIds(earnings);
-  const existing = await findTransferForPayout(stripe, payout.creator_id, payout.id);
+  const account = db.prepare('SELECT stripe_account_id FROM users WHERE id = ?').get(payout.creator_id);
+  let existing;
+  try {
+    existing = await findTransferForPayout(stripe, {
+      creatorId: payout.creator_id,
+      payoutId: payout.id,
+      destination: account && account.stripe_account_id,
+      createdAt: payout.created_at,
+    });
+  } catch (err) {
+    logPayoutNeedsReconcile(payout.id, payout.creator_id, err);
+    throw new Error('Could not look up the Stripe transfer. The payout was left unchanged.');
+  }
   if (existing) {
     if (earningIds.length) markEarningsPaid(db, earningIds, payout.id, existing.id);
     else {
@@ -788,6 +879,7 @@ async function requestPayout(db, stripe, creatorId) {
   let earningIds;
   let total;
   let payoutId;
+  let payoutCreatedAt;
   let claimedNow = false;
 
   if (processing.length) {
@@ -814,6 +906,7 @@ async function requestPayout(db, stripe, creatorId) {
     if (payoutAgeMs(payout.created_at) >= PAYOUT_RETRY_LIMIT_MS) {
       throw new Error('A payout has been processing for more than 24 hours. Reconcile it before retrying so it is not paid twice.');
     }
+    payoutCreatedAt = payout.created_at;
   } else {
     const available = db.prepare(`
       SELECT id, creator_cents FROM creator_earnings
@@ -843,14 +936,22 @@ async function requestPayout(db, stripe, creatorId) {
       }
       return newPayoutId;
     })();
+    payoutCreatedAt = db.prepare('SELECT created_at FROM creator_payouts WHERE id = ?').get(payoutId).created_at;
     claimedNow = true;
   }
+
+  const lookup = {
+    creatorId,
+    payoutId,
+    destination: user.stripe_account_id,
+    createdAt: payoutCreatedAt,
+  };
 
   // Same claim, same payout row: look up a transfer already stored under this
   // payout id before creating another one. Read only.
   if (!claimedNow) {
     try {
-      const existing = await findTransferForPayout(stripe, creatorId, payoutId);
+      const existing = await findTransferForPayout(stripe, lookup);
       if (existing) {
         markEarningsPaid(db, earningIds, payoutId, existing.id);
         return {
@@ -862,7 +963,7 @@ async function requestPayout(db, stripe, creatorId) {
       }
     } catch (err) {
       logPayoutNeedsReconcile(payoutId, creatorId, err);
-      throw err;
+      throw markUnknownOutcome(err);
     }
   }
 
@@ -885,7 +986,7 @@ async function requestPayout(db, stripe, creatorId) {
       // mean an earlier request with this payout id did, so check before releasing.
       if (err.type === 'StripeIdempotencyError') {
         try {
-          const existing = await findTransferForPayout(stripe, creatorId, payoutId);
+          const existing = await findTransferForPayout(stripe, lookup);
           if (existing) {
             markEarningsPaid(db, earningIds, payoutId, existing.id);
             return {
@@ -897,7 +998,7 @@ async function requestPayout(db, stripe, creatorId) {
           }
         } catch (lookupErr) {
           logPayoutNeedsReconcile(payoutId, creatorId, lookupErr);
-          throw err;
+          throw markUnknownOutcome(err);
         }
       }
       releasePayoutClaim(db, payoutId, earningIds);
@@ -938,5 +1039,10 @@ module.exports = {
   requestPayout,
   listStuckPayouts,
   reconcileStuckPayout,
+  isDefiniteStripeFailure,
+  isUnknownPayoutOutcome,
+  payoutClientError,
+  PAYOUT_PROCESSING_MESSAGE,
+  PAYOUT_DEFINITE_FAILURE_MESSAGE,
   availableAtIso,
 };

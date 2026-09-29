@@ -1800,6 +1800,19 @@ app.post('/api/creator/payout', requireAuth, requireVerified, async (req, res) =
     const result = await credits.requestPayout(db, stripe, req.session.userId);
     res.json({ success: true, ...result });
   } catch (e) {
+    const mapped = credits.payoutClientError(e);
+    if (mapped) {
+      // Raw Stripe details stay in the server log. The response is generic.
+      console.error(
+        mapped.httpStatus === 202 ? 'Payout left in processing:' : 'Payout Stripe error:',
+        e.type || '',
+        e.code || '',
+        e.statusCode || '',
+        e.requestId || '',
+        e.message || e
+      );
+      return res.status(mapped.httpStatus).json(mapped.body);
+    }
     res.status(400).json({ error: e.message || 'Payout failed' });
   }
 });

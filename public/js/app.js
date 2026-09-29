@@ -797,7 +797,12 @@
               if (!confirm('Request payout of available earnings to your Stripe account?')) return;
               const r = await fetch('/api/creator/payout', { method: 'POST' });
               const d = await r.json();
-              if (!r.ok) return alert(d.error || 'Payout failed');
+              if (r.status === 202) {
+                alert(d.message || 'Your payout is being confirmed with Stripe. Please do not retry; we will resolve it.');
+                showAccount();
+                return;
+              }
+              if (!r.ok) return alert(d.error || d.message || 'Payout failed');
               alert(`Payout sent: $${(d.amount_cents / 100).toFixed(2)}`);
               showAccount();
             };
