@@ -6,6 +6,7 @@ const assert = require('assert');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const vm = require('vm');
 const Database = require('better-sqlite3');
 const offline = require('./offline-download');
 
@@ -360,6 +361,151 @@ async function testSymlinkEscape() {
   console.log('PASS symlinks that leave the uploads directory are not embedded');
 }
 
+function createReaderNode(id) {
+  return {
+    id: id || '',
+    textContent: '',
+    hidden: false,
+    className: '',
+    type: '',
+    alt: '',
+    src: '',
+    children: [],
+    onclick: null,
+    get firstChild() { return this.children[0] || null; },
+    appendChild(child) {
+      this.children.push(child);
+      return child;
+    },
+    removeChild(child) {
+      const idx = this.children.indexOf(child);
+      if (idx >= 0) this.children.splice(idx, 1);
+      return child;
+    },
+    removeAttribute(name) {
+      if (name === 'src') this.src = '';
+    },
+  };
+}
+
+function mockReaderDocument(storyJson) {
+  const nodes = {};
+  function ensure(id) {
+    if (!nodes[id]) nodes[id] = createReaderNode(id);
+    return nodes[id];
+  }
+  ['pyp-story', 'title', 'by', 'progress', 'page-title', 'text', 'pic', 'choices'].forEach(ensure);
+  nodes['pyp-story'].textContent = storyJson;
+  return {
+    nodes,
+    getElementById(id) { return nodes[id] || null; },
+    createElement() { return createReaderNode(''); },
+  };
+}
+
+function mockStorage(initial) {
+  const store = Object.assign({}, initial || {});
+  return {
+    getItem(key) {
+      return Object.prototype.hasOwnProperty.call(store, key) ? store[key] : null;
+    },
+    setItem(key, value) { store[key] = String(value); },
+  };
+}
+
+function nodeLabel(node) {
+  return (node.textContent || '') + (node.children || []).map(nodeLabel).join('');
+}
+
+function clickLabeled(doc, label) {
+  const found = [];
+  function walk(node) {
+    if (!node) return;
+    if (typeof node.onclick === 'function' && nodeLabel(node) === label) found.push(node);
+    (node.children || []).forEach(walk);
+  }
+  walk(doc.nodes.choices);
+  assert.strictEqual(found.length, 1, 'button ' + label);
+  found[0].onclick();
+}
+
+function bootOfflineReader(payload, storage) {
+  const html = offline.buildOfflineHtml(payload, 'reader');
+  const marker = '<script>';
+  const start = html.lastIndexOf(marker);
+  const source = html.slice(start + marker.length).replace(/<\/script>[\s\S]*$/, '');
+  const document = mockReaderDocument(offline.safeJson(payload));
+  const localStorage = storage || mockStorage();
+  vm.runInNewContext(source, {
+    document,
+    localStorage,
+    JSON,
+    Object,
+    String,
+    Number,
+    Math,
+  });
+  return { html, document, localStorage };
+}
+
+function testReaderPathCounter() {
+  assert.strictEqual(offline.readerPathLabel(1), 'Panel 1');
+  assert.strictEqual(offline.readerPathLabel(2), 'Panel 2');
+  assert.strictEqual(offline.readerPathLabel(26), 'Panel 26');
+  assert.strictEqual(offline.readerPathLabel(0), 'Panel 1');
+  assert.strictEqual(offline.readerPathLabel(-4), 'Panel 1');
+  assert.strictEqual(offline.readerPathLabel(null), 'Panel 1');
+  assert.strictEqual(offline.readerPathLabel(2.9), 'Panel 2');
+
+  const story = {
+    id: 7,
+    title: 'Branch',
+    author: 'Ada',
+    images: {},
+    pages: [
+      { id: 3, title: 'Uploaded first', text: 'not the opening', image: null, is_start: 0, choices: [] },
+      {
+        id: 99,
+        title: 'Panel 1',
+        text: 'open',
+        image: null,
+        is_start: 1,
+        choices: [{ text: 'Go', to: 3, image: null }],
+      },
+    ],
+  };
+  const session = bootOfflineReader(story);
+  assert.ok(!session.html.includes('pages.indexOf(page)'));
+  assert.ok(!session.html.includes('" / " + pages.length'));
+  assert.strictEqual(session.document.nodes['page-title'].textContent, 'Panel 1');
+  assert.strictEqual(session.document.nodes.progress.textContent, 'Panel 1');
+  assert.ok(!session.document.nodes.progress.textContent.includes('/'));
+
+  clickLabeled(session.document, 'Go');
+  assert.strictEqual(session.document.nodes['page-title'].textContent, 'Uploaded first');
+  assert.strictEqual(session.document.nodes.progress.textContent, 'Panel 2');
+
+  clickLabeled(session.document, 'Back');
+  assert.strictEqual(session.document.nodes.progress.textContent, 'Panel 1');
+  assert.strictEqual(session.document.nodes['page-title'].textContent, 'Panel 1');
+
+  clickLabeled(session.document, 'Go');
+  assert.strictEqual(session.document.nodes.progress.textContent, 'Panel 2');
+  clickLabeled(session.document, 'Start over');
+  assert.strictEqual(session.document.nodes.progress.textContent, 'Panel 1');
+  assert.strictEqual(session.document.nodes['page-title'].textContent, 'Panel 1');
+
+  const resumedFrom = bootOfflineReader(story);
+  clickLabeled(resumedFrom.document, 'Go');
+  const resumed = bootOfflineReader(story, resumedFrom.localStorage);
+  assert.strictEqual(resumed.document.nodes.progress.textContent, 'Panel 2');
+  assert.strictEqual(resumed.document.nodes['page-title'].textContent, 'Uploaded first');
+  clickLabeled(resumed.document, 'Back');
+  assert.strictEqual(resumed.document.nodes.progress.textContent, 'Panel 1');
+
+  console.log('PASS reader counter follows the path and restarts at Panel 1');
+}
+
 function testOfflineBadge() {
   const min = require('./credits').FULL_STORY_MIN_CENTS;
   assert.strictEqual(offline.offlineCopyIncluded({ allow_download: 0, price_cents: min }), false);
@@ -378,6 +524,7 @@ async function main() {
   await testEscapingAndImages();
   await testUniqueImagesAndByteCap();
   await testSymlinkEscape();
+  testReaderPathCounter();
   testOfflineBadge();
   console.log('ALL PASS');
 }

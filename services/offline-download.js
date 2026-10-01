@@ -199,6 +199,13 @@ function createImageEmbedder(uploadsRoot, maxBytes) {
   return { embed, images };
 }
 
+// Path depth, not the panel's upload order. Opening panel is 1; back and restart follow history.
+function readerPathLabel(visitedCount) {
+  var n = Number(visitedCount);
+  if (!(n >= 1)) n = 1;
+  return 'Panel ' + Math.floor(n);
+}
+
 function buyerLabel(user) {
   const name = String((user && user.username) || '').trim();
   return (name || 'reader').slice(0, 80);
@@ -251,6 +258,7 @@ async function loadOfflinePayload(db, comic, uploadsRoot, maxImageBytes) {
 
 const READER_JS = [
   '(function () {',
+  readerPathLabel.toString(),
   '  var raw = document.getElementById("pyp-story").textContent;',
   '  var data = JSON.parse(raw);',
   '  var pages = data.pages || [];',
@@ -299,8 +307,7 @@ const READER_JS = [
   '    current = page;',
   '    document.getElementById("title").textContent = data.title || "Story";',
   '    document.getElementById("by").textContent = data.author ? ("by " + data.author) : "";',
-  '    var idx = pages.indexOf(page);',
-  '    document.getElementById("progress").textContent = page ? ((idx + 1) + " / " + pages.length) : "";',
+  '    document.getElementById("progress").textContent = page ? readerPathLabel(history.length + 1) : "";',
   '    document.getElementById("page-title").textContent = page && page.title ? page.title : "";',
   '    document.getElementById("text").textContent = page ? (page.text || "") : "This story has no pages.";',
   '    showImage(page && page.image);',
@@ -426,6 +433,7 @@ module.exports = {
   escapeHtml,
   safeJson,
   buildOfflineHtml,
+  readerPathLabel,
   renderOfflineDownload,
   localComicImagePath,
 };
