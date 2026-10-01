@@ -3663,6 +3663,13 @@
       }
     }
 
+    // Path depth, not the panel's upload order. Opening panel is 1; back and restart follow history.
+    function readerPathLabel(visitedCount) {
+      var n = Number(visitedCount);
+      if (!(n >= 1)) n = 1;
+      return 'Panel ' + Math.floor(n);
+    }
+
     function renderReaderPage(page) {
       currentReaderPage = page;
 
@@ -3698,9 +3705,7 @@
 
       document.getElementById('reader-text').textContent = page.text_content || '';
 
-      // Progress
-      const idx = readerAllPages.findIndex(p => p.id === page.id);
-      document.getElementById('reader-progress').textContent = `${idx + 1} / ${readerAllPages.length}`;
+      document.getElementById('reader-progress').textContent = readerPathLabel(pageHistory.length + 1);
 
       // Side "Go Back" button next to choices (height matches the choices stack dynamically)
       const backBtn = document.getElementById('reader-back-btn');

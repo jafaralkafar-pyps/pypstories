@@ -503,6 +503,14 @@ function testReaderPathCounter() {
   clickLabeled(resumed.document, 'Back');
   assert.strictEqual(resumed.document.nodes.progress.textContent, 'Panel 1');
 
+  const appJs = fs.readFileSync(path.join(__dirname, '..', 'public', 'js', 'app.js'), 'utf8');
+  const appMatch = appJs.match(/function readerPathLabel\(visitedCount\) \{[\s\S]*?\n    \}/);
+  assert.ok(appMatch, 'live reader defines readerPathLabel');
+  const compact = (source) => source.replace(/\s+/g, '');
+  assert.strictEqual(compact(appMatch[0]), compact(offline.readerPathLabel.toString()));
+  assert.ok(appJs.includes('readerPathLabel(pageHistory.length + 1)'));
+  assert.ok(!appJs.includes('/ ${readerAllPages.length}'));
+
   console.log('PASS reader counter follows the path and restarts at Panel 1');
 }
 
