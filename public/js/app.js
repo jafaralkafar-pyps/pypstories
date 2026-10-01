@@ -961,7 +961,7 @@
             <div class="flex-1"></div>
             
             <div class="flex justify-between items-center text-xs pt-3 border-t border-slate-800 mt-2 text-slate-400 gap-2">
-              <div class="truncate">${comic.page_count || 0} pages · ${comic.view_count || 0} views</div>
+              <div class="truncate">${comic.page_count || 0} pages · ${comic.view_count || 0} views${comic.allow_download ? ' · Offline copy included' : ''}</div>
               <div class="flex-shrink-0 text-right">
                 <span class="text-amber-300/90">${comic.avg_rating != null ? '★ ' + comic.avg_rating : '★ —'}</span>
                 <span class="text-slate-500">${comic.rating_count ? ' (' + comic.rating_count + ')' : ''}</span>
@@ -1110,6 +1110,30 @@
       });
     }
 
+    async function downloadOfflineCopy(comicId) {
+      try {
+        const res = await fetch(`/api/comics/${comicId}/offline`);
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          alert(data.error || 'Download failed');
+          return;
+        }
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        const match = (res.headers.get('Content-Disposition') || '').match(/filename="([^"]+)"/);
+        link.href = url;
+        link.download = match ? match[1] : 'story.html';
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        URL.revokeObjectURL(url);
+      } catch (err) {
+        console.error(err);
+        alert('Download failed');
+      }
+    }
+
     async function showPurchased(filter) {
       if (!currentUser) {
         showAuthModal();
@@ -1204,9 +1228,10 @@
           <div class="text-sm text-slate-400 mt-0.5">by ${escapeHtml(comic.author || 'Unknown')} · ${comic.page_count || 0} pages</div>
           <div class="mt-2 flex flex-wrap gap-1.5">${chips.join('')}</div>
           ${marketNote}
-          <div class="mt-5 flex gap-2 text-sm">
+          <div class="mt-5 flex flex-wrap gap-2 text-sm">
             <button type="button" class="flex-1 py-2 bg-blue-600 hover:bg-blue-500 rounded-2xl text-xs sm:text-sm text-white" data-action="read">Read</button>
             <button type="button" class="flex-1 py-2 border border-slate-700 hover:bg-slate-800 rounded-2xl text-xs sm:text-sm" data-action="info">Details</button>
+            ${comic.can_download_offline ? '<button type="button" class="flex-1 py-2 border border-emerald-700/70 text-emerald-200 hover:bg-emerald-950/40 rounded-2xl text-xs sm:text-sm" data-action="download">Download offline copy</button>' : ''}
           </div>
         `;
         div.dataset.comicId = comic.id;
@@ -1221,6 +1246,12 @@
           if (btn && btn.dataset.action === 'info') {
             e.stopPropagation();
             showComicInfo(id);
+            return;
+          }
+          if (btn && btn.dataset.action === 'download') {
+            e.stopPropagation();
+            e.preventDefault();
+            downloadOfflineCopy(id);
             return;
           }
           openReader(id);
@@ -1675,6 +1706,42 @@
       } else {
         if (status) status.textContent = 'Click Add Cover. Recommended: 3:2 landscape (e.g. 1200×800).';
         if (coverBtn) coverBtn.textContent = 'Add Cover';
+      }
+
+      const downloadBox = document.getElementById('editor-allow-download');
+      if (downloadBox) {
+        downloadBox.checked = !!comic.allow_download;
+        downloadBox.onchange = async () => {
+          const turningOn = downloadBox.checked;
+          if (turningOn) {
+            const ack = confirm('Buyers keep this copy permanently, even after refunds or if you remove the story. Turning this off later does not remove copies already downloaded.');
+            if (!ack) {
+              downloadBox.checked = false;
+              return;
+            }
+          }
+          try {
+            const res = await fetch(`/api/comics/${editingComicId}`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                allow_download: turningOn ? 1 : 0,
+                allow_download_ack: turningOn === true,
+              }),
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) {
+              alert(data.error || 'Could not update offline download');
+              downloadBox.checked = !turningOn;
+              return;
+            }
+            downloadBox.checked = !!data.allow_download;
+          } catch (err) {
+            console.error(err);
+            alert('Could not update offline download');
+            downloadBox.checked = !turningOn;
+          }
+        };
       }
 
       const priceInput = document.getElementById('editor-comic-price');
@@ -3191,6 +3258,12 @@
       const pagesEl = document.getElementById('info-pages');
       const pageCount = comic.pageCount || comic.page_count || 0;
       pagesEl.textContent = `${pageCount} page${pageCount === 1 ? '' : 's'}`;
+
+      const offlineEl = document.getElementById('info-offline');
+      if (offlineEl) {
+        if (comic.allow_download) offlineEl.classList.remove('hidden');
+        else offlineEl.classList.add('hidden');
+      }
 
       const priceEl = document.getElementById('info-price');
       const price = comic.price || (comic.price_cents ? (comic.price_cents / 100).toFixed(2) : null);
