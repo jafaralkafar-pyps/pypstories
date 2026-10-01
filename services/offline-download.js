@@ -6,6 +6,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const credits = require('./credits');
 
 const OFFLINE_DOWNLOAD_ACK = 'Buyers keep this copy permanently, even after refunds or if you remove the story. Turning this off later does not remove copies already downloaded.';
 
@@ -59,6 +60,12 @@ function applyAllowDownloadChange(currentValue, requested, acknowledged) {
     throw err;
   }
   return { changed: true, value: next };
+}
+
+function offlineCopyIncluded(comic) {
+  if (!comic || !comic.allow_download) return false;
+  const cents = Number(comic.price_cents);
+  return Number.isFinite(cents) && cents >= credits.FULL_STORY_MIN_CENTS;
 }
 
 function decideOfflineAccess({ comic, user, hasFullPurchase }) {
@@ -415,6 +422,7 @@ module.exports = {
   parseAllowDownloadFlag,
   applyAllowDownloadChange,
   decideOfflineAccess,
+  offlineCopyIncluded,
   escapeHtml,
   safeJson,
   buildOfflineHtml,

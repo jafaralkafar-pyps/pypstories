@@ -931,6 +931,14 @@
       }
     }
 
+    // Full-story minimum is $5.99. Free and chapter-priced stories are not a full purchase.
+    function storyOffersOfflineCopy(comic) {
+      if (!comic || !comic.allow_download) return false;
+      if (comic.offline_copy_included === 0 || comic.offline_copy_included === false) return false;
+      const cents = Number(comic.price_cents);
+      return Number.isFinite(cents) && cents >= 599;
+    }
+
     function renderComicsGrid(comics, container, showEmpty = true) {
       container.innerHTML = '';
       const emptyEl = document.getElementById('browse-empty');
@@ -961,7 +969,7 @@
             <div class="flex-1"></div>
             
             <div class="flex justify-between items-center text-xs pt-3 border-t border-slate-800 mt-2 text-slate-400 gap-2">
-              <div class="truncate">${comic.page_count || 0} pages · ${comic.view_count || 0} views${comic.allow_download ? ' · Offline copy included' : ''}</div>
+              <div class="truncate">${comic.page_count || 0} pages · ${comic.view_count || 0} views${storyOffersOfflineCopy(comic) ? ' · Offline copy included' : ''}</div>
               <div class="flex-shrink-0 text-right">
                 <span class="text-amber-300/90">${comic.avg_rating != null ? '★ ' + comic.avg_rating : '★ —'}</span>
                 <span class="text-slate-500">${comic.rating_count ? ' (' + comic.rating_count + ')' : ''}</span>
@@ -3261,7 +3269,7 @@
 
       const offlineEl = document.getElementById('info-offline');
       if (offlineEl) {
-        if (comic.allow_download) offlineEl.classList.remove('hidden');
+        if (storyOffersOfflineCopy(comic)) offlineEl.classList.remove('hidden');
         else offlineEl.classList.add('hidden');
       }
 

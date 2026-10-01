@@ -2011,6 +2011,7 @@ app.get('/api/comics', (req, res) => {
       `).get(c.id);
       if (first && first.image_path) c.cover_image = first.image_path;
     }
+    c.offline_copy_included = offlineDownload.offlineCopyIncluded(c) ? 1 : 0;
   });
   res.json(comics);
 });
@@ -2045,6 +2046,7 @@ app.get('/api/comics/:id', (req, res) => {
   comic.pageCount = pages.length;
   comic.hasStart = pages.some(p => p.is_start);
   comic.price = comic.price_cents ? (comic.price_cents / 100).toFixed(2) : null;
+  comic.offline_copy_included = offlineDownload.offlineCopyIncluded(comic) ? 1 : 0;
 
   const ratingRow = db.prepare(`
     SELECT AVG(stars * 1.0) as avg_rating, COUNT(*) as rating_count

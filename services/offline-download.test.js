@@ -360,12 +360,25 @@ async function testSymlinkEscape() {
   console.log('PASS symlinks that leave the uploads directory are not embedded');
 }
 
+function testOfflineBadge() {
+  const min = require('./credits').FULL_STORY_MIN_CENTS;
+  assert.strictEqual(offline.offlineCopyIncluded({ allow_download: 0, price_cents: min }), false);
+  assert.strictEqual(offline.offlineCopyIncluded({ allow_download: 1, price_cents: 0 }), false);
+  assert.strictEqual(offline.offlineCopyIncluded({ allow_download: 1, price_cents: 99 }), false);
+  assert.strictEqual(offline.offlineCopyIncluded({ allow_download: 1, price_cents: min - 1 }), false);
+  assert.strictEqual(offline.offlineCopyIncluded({ allow_download: 1, price_cents: min }), true);
+  assert.strictEqual(offline.offlineCopyIncluded({ allow_download: 1, price_cents: min + 401 }), true);
+  assert.strictEqual(offline.offlineCopyIncluded({ allow_download: 1, price_cents: null }), false);
+  console.log('PASS offline badge only for stories that can be bought in full');
+}
+
 async function main() {
   testMigrationRerunnable();
   await testAccess();
   await testEscapingAndImages();
   await testUniqueImagesAndByteCap();
   await testSymlinkEscape();
+  testOfflineBadge();
   console.log('ALL PASS');
 }
 
