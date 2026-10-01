@@ -9,6 +9,7 @@ const Database = require('better-sqlite3');
 const multer = require('multer');
 const storageService = require('./services/storage');
 const credits = require('./services/credits');
+const offlineDownload = require('./services/offline-download');
 const {
   validateUsername,
   validatePublicText,
@@ -166,6 +167,7 @@ db.exec(`
     reviewed_by INTEGER,
     review_notes TEXT,
     last_reviewed_at TEXT,
+    allow_download INTEGER NOT NULL DEFAULT 0,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
   );
 
@@ -290,6 +292,7 @@ try {
 try {
   db.exec(`ALTER TABLE comics ADD COLUMN price_cents INTEGER DEFAULT 0`);
 } catch (e) {}
+offlineDownload.ensureAllowDownloadColumn(db);
 try {
   db.exec(`ALTER TABLE comics ADD COLUMN cover_image TEXT`);
 } catch (e) {}
@@ -2258,6 +2261,20 @@ app.get('/api/comics/:id/purchased', requireAuth, (req, res) => {
   res.json({ purchased: !!purchase });
 });
 
+// Self-contained offline copy. Allowed only when the creator turned downloads on
+// and the requester bought the story, owns it, or is an admin.
+app.get('/api/comics/:id/offline', requireAuth, (req, res) => {
+  const current = getCurrentUser(req);
+  const result = offlineDownload.renderOfflineDownload(db, {
+    user: current ? { id: current.id, role: current.role, username: current.username } : null,
+    comicId: parseInt(req.params.id, 10),
+    uploadsRoot: path.join(__dirname, 'uploads', 'comics'),
+  });
+  if (!result.ok) return res.status(result.status).json({ error: result.error });
+  res.set(result.headers);
+  res.send(result.body);
+});
+
 // My Library — purchased + saved free + previously read (filter via ?filter=)
 // filter: all | purchased | saved | read
 app.get('/api/me/library', requireAuth, (req, res) => {
@@ -2303,6 +2320,7 @@ app.get('/api/me/library', requireAuth, (req, res) => {
       c.cover_image,
       c.status,
       c.price_cents,
+      c.allow_download,
       c.view_count,
       c.created_at,
       u.username as author,
@@ -2389,6 +2407,8 @@ app.get('/api/me/library', requireAuth, (req, res) => {
         view_count: c.view_count || 0,
         author: c.author,
         purchased,
+        allow_download: c.allow_download ? 1 : 0,
+        can_download_offline: !!(c.allow_download && c.has_full_purchase),
         access: c.has_full_purchase ? 'full' : (c.chapter_unlock_count > 0 ? 'chapter' : null),
         chapter_unlock_count: c.chapter_unlock_count || 0,
         saved: !!c.is_saved,
@@ -2564,6 +2584,7 @@ app.post('/api/comics/:id', requireAuth, requireVerified, (req, res) => {
 
   let updates = [];
   let values = [];
+  let contentChanged = false;
 
   if (title !== undefined) {
     const titleCheck = validateContentText(title, {
@@ -2577,6 +2598,7 @@ app.post('/api/comics/:id', requireAuth, requireVerified, (req, res) => {
     }
     updates.push('title = ?');
     values.push(titleCheck.text);
+    contentChanged = true;
   }
   if (description !== undefined) {
     const descCheck = validateContentText(description, {
@@ -2588,10 +2610,12 @@ app.post('/api/comics/:id', requireAuth, requireVerified, (req, res) => {
     }
     updates.push('description = ?');
     values.push(descCheck.text);
+    contentChanged = true;
   }
   if (genre !== undefined) {
     updates.push('genre = ?');
     values.push(genre);
+    contentChanged = true;
   }
   if (price !== undefined) {
     const price_cents = Math.max(0, Math.round(parseFloat(price) * 100));
@@ -2602,6 +2626,24 @@ app.post('/api/comics/:id', requireAuth, requireVerified, (req, res) => {
     }
     updates.push('price_cents = ?');
     values.push(price_cents);
+    contentChanged = true;
+  }
+
+  if (req.body.allow_download !== undefined) {
+    let downloadChange;
+    try {
+      downloadChange = offlineDownload.applyAllowDownloadChange(
+        comic.allow_download,
+        req.body.allow_download,
+        req.body.allow_download_ack === true
+      );
+    } catch (err) {
+      return res.status(err.status || 400).json({ error: err.message });
+    }
+    if (downloadChange.changed) {
+      updates.push('allow_download = ?');
+      values.push(downloadChange.value);
+    }
   }
 
   if (updates.length === 0) {
@@ -2610,7 +2652,7 @@ app.post('/api/comics/:id', requireAuth, requireVerified, (req, res) => {
 
   values.push(comicId);
   db.prepare(`UPDATE comics SET ${updates.join(', ')} WHERE id = ?`).run(...values);
-  const reviewInvalidated = invalidateComicReviewOnEdit(comicId);
+  const reviewInvalidated = contentChanged ? invalidateComicReviewOnEdit(comicId) : false;
 
   const updated = db.prepare('SELECT * FROM comics WHERE id = ?').get(comicId);
   updated.price = updated.price_cents ? (updated.price_cents / 100).toFixed(2) : null;
