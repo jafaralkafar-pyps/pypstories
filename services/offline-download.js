@@ -203,7 +203,7 @@ function createImageEmbedder(uploadsRoot, maxBytes) {
 function readerPathLabel(visitedCount) {
   var n = Number(visitedCount);
   if (!(n >= 1)) n = 1;
-  return 'Panel ' + Math.floor(n);
+  return 'Page ' + Math.floor(n);
 }
 
 function buyerLabel(user) {

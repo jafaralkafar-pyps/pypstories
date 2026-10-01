@@ -449,13 +449,13 @@ function bootOfflineReader(payload, storage) {
 }
 
 function testReaderPathCounter() {
-  assert.strictEqual(offline.readerPathLabel(1), 'Panel 1');
-  assert.strictEqual(offline.readerPathLabel(2), 'Panel 2');
-  assert.strictEqual(offline.readerPathLabel(26), 'Panel 26');
-  assert.strictEqual(offline.readerPathLabel(0), 'Panel 1');
-  assert.strictEqual(offline.readerPathLabel(-4), 'Panel 1');
-  assert.strictEqual(offline.readerPathLabel(null), 'Panel 1');
-  assert.strictEqual(offline.readerPathLabel(2.9), 'Panel 2');
+  assert.strictEqual(offline.readerPathLabel(1), 'Page 1');
+  assert.strictEqual(offline.readerPathLabel(2), 'Page 2');
+  assert.strictEqual(offline.readerPathLabel(26), 'Page 26');
+  assert.strictEqual(offline.readerPathLabel(0), 'Page 1');
+  assert.strictEqual(offline.readerPathLabel(-4), 'Page 1');
+  assert.strictEqual(offline.readerPathLabel(null), 'Page 1');
+  assert.strictEqual(offline.readerPathLabel(2.9), 'Page 2');
 
   const story = {
     id: 7,
@@ -478,30 +478,30 @@ function testReaderPathCounter() {
   assert.ok(!session.html.includes('pages.indexOf(page)'));
   assert.ok(!session.html.includes('" / " + pages.length'));
   assert.strictEqual(session.document.nodes['page-title'].textContent, 'Panel 1');
-  assert.strictEqual(session.document.nodes.progress.textContent, 'Panel 1');
+  assert.strictEqual(session.document.nodes.progress.textContent, 'Page 1');
   assert.ok(!session.document.nodes.progress.textContent.includes('/'));
 
   clickLabeled(session.document, 'Go');
   assert.strictEqual(session.document.nodes['page-title'].textContent, 'Uploaded first');
-  assert.strictEqual(session.document.nodes.progress.textContent, 'Panel 2');
+  assert.strictEqual(session.document.nodes.progress.textContent, 'Page 2');
 
   clickLabeled(session.document, 'Back');
-  assert.strictEqual(session.document.nodes.progress.textContent, 'Panel 1');
+  assert.strictEqual(session.document.nodes.progress.textContent, 'Page 1');
   assert.strictEqual(session.document.nodes['page-title'].textContent, 'Panel 1');
 
   clickLabeled(session.document, 'Go');
-  assert.strictEqual(session.document.nodes.progress.textContent, 'Panel 2');
+  assert.strictEqual(session.document.nodes.progress.textContent, 'Page 2');
   clickLabeled(session.document, 'Start over');
-  assert.strictEqual(session.document.nodes.progress.textContent, 'Panel 1');
+  assert.strictEqual(session.document.nodes.progress.textContent, 'Page 1');
   assert.strictEqual(session.document.nodes['page-title'].textContent, 'Panel 1');
 
   const resumedFrom = bootOfflineReader(story);
   clickLabeled(resumedFrom.document, 'Go');
   const resumed = bootOfflineReader(story, resumedFrom.localStorage);
-  assert.strictEqual(resumed.document.nodes.progress.textContent, 'Panel 2');
+  assert.strictEqual(resumed.document.nodes.progress.textContent, 'Page 2');
   assert.strictEqual(resumed.document.nodes['page-title'].textContent, 'Uploaded first');
   clickLabeled(resumed.document, 'Back');
-  assert.strictEqual(resumed.document.nodes.progress.textContent, 'Panel 1');
+  assert.strictEqual(resumed.document.nodes.progress.textContent, 'Page 1');
 
   const appJs = fs.readFileSync(path.join(__dirname, '..', 'public', 'js', 'app.js'), 'utf8');
   const appMatch = appJs.match(/function readerPathLabel\(visitedCount\) \{[\s\S]*?\n    \}/);
@@ -511,7 +511,7 @@ function testReaderPathCounter() {
   assert.ok(appJs.includes('readerPathLabel(pageHistory.length + 1)'));
   assert.ok(!appJs.includes('/ ${readerAllPages.length}'));
 
-  console.log('PASS reader counter follows the path and restarts at Panel 1');
+  console.log('PASS reader counter follows the path and restarts at Page 1');
 }
 
 function testOfflineBadge() {
