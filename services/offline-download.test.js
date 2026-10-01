@@ -261,11 +261,111 @@ async function testUniqueImagesAndByteCap() {
   console.log('PASS each image is embedded once and oversized stories return 413');
 }
 
+function tryFileSymlink(target, linkPath) {
+  try {
+    fs.symlinkSync(target, linkPath, 'file');
+    return true;
+  } catch (err) {
+    if (!err || (err.code !== 'EPERM' && err.code !== 'EACCES' && err.code !== 'ENOTSUP')) throw err;
+    return false;
+  }
+}
+
+function removeReparse(linkPath) {
+  try { fs.unlinkSync(linkPath); } catch (err) {
+    try { fs.rmdirSync(linkPath); } catch (err2) { /* already gone */ }
+  }
+}
+
+async function testSymlinkEscape() {
+  const db = baseDb();
+  offline.ensureAllowDownloadColumn(db);
+  db.prepare(`INSERT INTO users (id, username, email, role) VALUES (1, 'AuthorName', 'author@secret.test', 'user')`).run();
+  db.prepare(`INSERT INTO users (id, username, email, role) VALUES (2, 'BuyerName', 'buyer@secret.test', 'user')`).run();
+  db.prepare(`
+    INSERT INTO comics (id, user_id, title, description, allow_download)
+    VALUES (5, 1, 'Linked', 'blurb', 1)
+  `).run();
+  db.prepare(`INSERT INTO purchases (user_id, comic_id, amount_paid_cents) VALUES (2, 5, 599)`).run();
+
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pyp-offline-jail-'));
+  const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'pyp-offline-out-'));
+  const secret = Buffer.from('SECRET_FILE_BYTES');
+  const comicDir = path.join(root, '5');
+  fs.mkdirSync(comicDir, { recursive: true });
+  const secretFile = path.join(outside, 'secret.png');
+  fs.writeFileSync(secretFile, secret);
+  fs.writeFileSync(path.join(comicDir, 'dot.png'), PNG);
+
+  const reparse = [];
+  let outsideUrl;
+  if (tryFileSymlink(secretFile, path.join(comicDir, 'link.png'))) {
+    outsideUrl = '/uploads/comics/5/link.png';
+    reparse.push(path.join(comicDir, 'link.png'));
+  } else {
+    // File symlinks need extra Windows privilege. A directory junction is still
+    // a reparse point that fs.realpath follows, and it can be created unprivileged.
+    const junction = path.join(comicDir, 'escape');
+    fs.symlinkSync(outside, junction, 'junction');
+    reparse.push(junction);
+    outsideUrl = '/uploads/comics/5/escape/secret.png';
+  }
+
+  let insideUrl;
+  if (tryFileSymlink(path.join(comicDir, 'dot.png'), path.join(comicDir, 'inside.png'))) {
+    insideUrl = '/uploads/comics/5/inside.png';
+    reparse.push(path.join(comicDir, 'inside.png'));
+  } else {
+    const kept = path.join(comicDir, 'kept');
+    fs.mkdirSync(kept);
+    fs.copyFileSync(path.join(comicDir, 'dot.png'), path.join(kept, 'dot.png'));
+    const alias = path.join(comicDir, 'alias');
+    fs.symlinkSync(kept, alias, 'junction');
+    reparse.push(alias);
+    insideUrl = '/uploads/comics/5/alias/dot.png';
+  }
+
+  db.prepare(`
+    INSERT INTO pages (id, comic_id, title, text_content, image_path, is_start)
+    VALUES (10, 5, 'Start', 'Hello', ?, 1)
+  `).run(insideUrl);
+  db.prepare(`
+    INSERT INTO pages (id, comic_id, title, text_content, is_start)
+    VALUES (11, 5, 'End', 'Bye', 0)
+  `).run();
+  db.prepare(`
+    INSERT INTO choices (from_page_id, choice_text, to_page_id, choice_image)
+    VALUES (10, 'Go', 11, ?)
+  `).run(outsideUrl);
+
+  try {
+    const lexical = offline.localComicImagePath(outsideUrl, root);
+    assert.ok(lexical);
+    assert.ok(!lexical.startsWith('..'));
+    const result = await offline.renderOfflineDownload(db, {
+      user: { id: 2, username: 'BuyerName', role: 'user' },
+      comicId: 5,
+      uploadsRoot: root,
+      maxImageBytes: PNG.length,
+    });
+    assert.strictEqual(result.ok, true, result.error);
+    assert.ok(!result.body.includes('SECRET_FILE_BYTES'));
+    assert.ok(!result.body.includes(secret.toString('base64')));
+    assert.strictEqual(result.body.split(PNG.toString('base64')).length - 1, 1);
+  } finally {
+    reparse.forEach(removeReparse);
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(outside, { recursive: true, force: true });
+  }
+  console.log('PASS symlinks that leave the uploads directory are not embedded');
+}
+
 async function main() {
   testMigrationRerunnable();
   await testAccess();
   await testEscapingAndImages();
   await testUniqueImagesAndByteCap();
+  await testSymlinkEscape();
   console.log('ALL PASS');
 }
 

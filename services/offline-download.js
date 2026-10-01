@@ -126,12 +126,34 @@ function localComicImagePath(imagePath, uploadsRoot) {
   return full;
 }
 
+function realPathStaysInside(rootReal, fileReal) {
+  if (!rootReal || !fileReal) return false;
+  const rel = path.relative(rootReal, fileReal);
+  if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) return false;
+  if (process.platform === 'win32') {
+    const root = String(rootReal).toLowerCase();
+    const file = String(fileReal).toLowerCase();
+    const prefix = root.endsWith(path.sep) ? root : root + path.sep;
+    if (file !== root && !file.startsWith(prefix)) return false;
+  }
+  return true;
+}
+
 async function locateComicImage(imagePath, uploadsRoot) {
   const full = localComicImagePath(imagePath, uploadsRoot);
   if (!full) return null;
   const mime = IMAGE_MIME[path.extname(full).toLowerCase()];
   if (!mime) return null;
-  return { full, mime, key: full };
+  let rootReal;
+  let fileReal;
+  try {
+    rootReal = await fs.promises.realpath(path.resolve(uploadsRoot));
+    fileReal = await fs.promises.realpath(full);
+  } catch (err) {
+    return null;
+  }
+  if (!realPathStaysInside(rootReal, fileReal)) return null;
+  return { full: fileReal, mime, key: fileReal };
 }
 
 function createImageEmbedder(uploadsRoot, maxBytes) {
