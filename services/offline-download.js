@@ -17,6 +17,25 @@ const IMAGE_MIME = {
   '.webp': 'image/webp',
 };
 
+const OFFLINE_IMAGE_BYTE_LIMIT = 40 * 1024 * 1024;
+
+function offlineImageTooLargeMessage(limitBytes) {
+  const bytes = Number.isFinite(Number(limitBytes)) && Number(limitBytes) >= 0
+    ? Number(limitBytes)
+    : OFFLINE_IMAGE_BYTE_LIMIT;
+  const mb = bytes / (1024 * 1024);
+  const label = mb >= 1 && mb === Math.round(mb)
+    ? Math.round(mb) + ' MB'
+    : bytes + ' bytes';
+  return "This story's images are too large for an offline copy. The limit is " + label + '.';
+}
+
+function imageTooLargeError(limitBytes) {
+  const err = new Error(offlineImageTooLargeMessage(limitBytes));
+  err.status = 413;
+  return err;
+}
+
 function ensureAllowDownloadColumn(db) {
   const cols = db.prepare('PRAGMA table_info(comics)').all();
   if (cols.some((col) => col.name === 'allow_download')) return false;
@@ -107,19 +126,48 @@ function localComicImagePath(imagePath, uploadsRoot) {
   return full;
 }
 
-function imageDataUrl(imagePath, uploadsRoot) {
+async function locateComicImage(imagePath, uploadsRoot) {
   const full = localComicImagePath(imagePath, uploadsRoot);
   if (!full) return null;
   const mime = IMAGE_MIME[path.extname(full).toLowerCase()];
   if (!mime) return null;
-  let buf;
-  try {
-    buf = fs.readFileSync(full);
-  } catch (err) {
-    return null;
+  return { full, mime, key: full };
+}
+
+function createImageEmbedder(uploadsRoot, maxBytes) {
+  const limit = Number.isFinite(Number(maxBytes)) && Number(maxBytes) >= 0
+    ? Number(maxBytes)
+    : OFFLINE_IMAGE_BYTE_LIMIT;
+  const byKey = new Map();
+  const images = {};
+  let total = 0;
+  let nextId = 0;
+
+  async function embed(imagePath) {
+    const located = await locateComicImage(imagePath, uploadsRoot);
+    if (!located) return null;
+    if (byKey.has(located.key)) return byKey.get(located.key);
+    let buf;
+    try {
+      const stat = await fs.promises.stat(located.full);
+      if (!stat.isFile() || stat.size <= 0) return null;
+      if (total + stat.size > limit) throw imageTooLargeError(limit);
+      buf = await fs.promises.readFile(located.full);
+    } catch (err) {
+      if (err && err.status === 413) throw err;
+      return null;
+    }
+    if (!buf || !buf.length) return null;
+    if (total + buf.length > limit) throw imageTooLargeError(limit);
+    total += buf.length;
+    const id = String(nextId);
+    nextId += 1;
+    images[id] = 'data:' + located.mime + ';base64,' + buf.toString('base64');
+    byKey.set(located.key, id);
+    return id;
   }
-  if (!buf || !buf.length) return null;
-  return 'data:' + mime + ';base64,' + buf.toString('base64');
+
+  return { embed, images };
 }
 
 function buyerLabel(user) {
@@ -127,7 +175,7 @@ function buyerLabel(user) {
   return (name || 'reader').slice(0, 80);
 }
 
-function loadOfflinePayload(db, comic, uploadsRoot) {
+async function loadOfflinePayload(db, comic, uploadsRoot, maxImageBytes) {
   const authorRow = db.prepare('SELECT username FROM users WHERE id = ?').get(comic.user_id);
   const pages = db.prepare(`
     SELECT id, title, text_content, image_path, is_start
@@ -140,29 +188,35 @@ function loadOfflinePayload(db, comic, uploadsRoot) {
     WHERE p.comic_id = ?
     ORDER BY ch.id ASC
   `).all(comic.id);
+  const embedder = createImageEmbedder(uploadsRoot, maxImageBytes);
   const byPage = new Map();
   pages.forEach((page) => byPage.set(page.id, []));
-  choices.forEach((choice) => {
+  for (const choice of choices) {
     const list = byPage.get(choice.from_page_id);
-    if (!list) return;
+    if (!list) continue;
     list.push({
       text: choice.choice_text || '',
       to: choice.to_page_id,
-      image: imageDataUrl(choice.choice_image, uploadsRoot),
+      image: await embedder.embed(choice.choice_image),
     });
-  });
+  }
+  const outPages = [];
+  for (const page of pages) {
+    outPages.push({
+      id: page.id,
+      title: page.title || '',
+      text: page.text_content || '',
+      image: await embedder.embed(page.image_path),
+      is_start: page.is_start ? 1 : 0,
+      choices: byPage.get(page.id) || [],
+    });
+  }
   return {
     id: comic.id,
     title: comic.title || 'Untitled',
     author: (authorRow && authorRow.username) || '',
-    pages: pages.map((page) => ({
-      id: page.id,
-      title: page.title || '',
-      text: page.text_content || '',
-      image: imageDataUrl(page.image_path, uploadsRoot),
-      is_start: page.is_start ? 1 : 0,
-      choices: byPage.get(page.id) || [],
-    })),
+    images: embedder.images,
+    pages: outPages,
   };
 }
 
@@ -198,9 +252,18 @@ const READER_JS = [
   '      localStorage.setItem(key, JSON.stringify({ pageId: current ? current.id : null, history: history }));',
   '    } catch (e) {}',
   '  }',
-  '  function showImage(src) {',
+  '  function lookupImage(ref) {',
+  '    if (ref == null || ref === "") return "";',
+  '    var src = String(ref);',
+  '    if (data.images && Object.prototype.hasOwnProperty.call(data.images, src)) {',
+  '      src = String(data.images[src] || "");',
+  '    }',
+  '    return src.indexOf("data:image/") === 0 ? src : "";',
+  '  }',
+  '  function showImage(ref) {',
   '    var img = document.getElementById("pic");',
-  '    if (src && String(src).indexOf("data:image/") === 0) { img.src = src; img.hidden = false; }',
+  '    var src = lookupImage(ref);',
+  '    if (src) { img.src = src; img.hidden = false; }',
   '    else { img.removeAttribute("src"); img.hidden = true; }',
   '  }',
   '  function render(page) {',
@@ -236,8 +299,9 @@ const READER_JS = [
   '    for (var c = 0; c < choices.length; c++) {',
   '      (function (choice) {',
   '        var btn = document.createElement("button"); btn.type = "button";',
-  '        if (choice.image && String(choice.image).indexOf("data:image/") === 0) {',
-  '          var im = document.createElement("img"); im.alt = ""; im.src = choice.image; im.className = "choice-img"; btn.appendChild(im);',
+  '        var choiceSrc = lookupImage(choice.image);',
+  '        if (choiceSrc) {',
+  '          var im = document.createElement("img"); im.alt = ""; im.src = choiceSrc; im.className = "choice-img"; btn.appendChild(im);',
   '        }',
   '        var span = document.createElement("span"); span.textContent = choice.text || "\\u2192"; btn.appendChild(span);',
   '        btn.onclick = function () {',
@@ -283,7 +347,11 @@ function buildOfflineHtml(payload, buyerName) {
     + '<script>' + READER_JS + '</script></body></html>';
 }
 
-function renderOfflineDownload(db, { user, comicId, uploadsRoot }) {
+async function renderOfflineDownload(db, options) {
+  const user = options && options.user;
+  const comicId = options && options.comicId;
+  const uploadsRoot = options && options.uploadsRoot;
+  const maxImageBytes = options && options.maxImageBytes;
   const id = Number(comicId);
   const comic = Number.isInteger(id)
     ? db.prepare(`
@@ -296,7 +364,13 @@ function renderOfflineDownload(db, { user, comicId, uploadsRoot }) {
   `).get(user.id, comic.id));
   const decision = decideOfflineAccess({ comic, user, hasFullPurchase });
   if (!decision.ok) return decision;
-  const payload = loadOfflinePayload(db, comic, uploadsRoot);
+  let payload;
+  try {
+    payload = await loadOfflinePayload(db, comic, uploadsRoot, maxImageBytes);
+  } catch (err) {
+    if (err && err.status === 413) return { ok: false, status: 413, error: err.message };
+    throw err;
+  }
   const name = buyerLabel(user);
   return {
     ok: true,
@@ -313,6 +387,8 @@ function renderOfflineDownload(db, { user, comicId, uploadsRoot }) {
 
 module.exports = {
   OFFLINE_DOWNLOAD_ACK,
+  OFFLINE_IMAGE_BYTE_LIMIT,
+  offlineImageTooLargeMessage,
   ensureAllowDownloadColumn,
   parseAllowDownloadFlag,
   applyAllowDownloadChange,

@@ -111,24 +111,24 @@ function testMigrationRerunnable() {
   console.log('PASS migration is re-runnable and leaves existing values alone');
 }
 
-function testAccess() {
+async function testAccess() {
   const off = baseDb();
   const people = seedStory(off, { allow: 0, purchased: true });
-  const refusedOff = offline.renderOfflineDownload(off, { user: people.buyer, comicId: 5, uploadsRoot: null });
+  const refusedOff = await offline.renderOfflineDownload(off, { user: people.buyer, comicId: 5, uploadsRoot: null });
   assert.strictEqual(refusedOff.ok, false);
   assert.strictEqual(refusedOff.status, 403);
   assert.match(refusedOff.error, /not enabled/);
 
   const locked = baseDb();
   const lockedPeople = seedStory(locked, { allow: 1, purchased: false });
-  const refusedPurchase = offline.renderOfflineDownload(locked, { user: lockedPeople.buyer, comicId: 5, uploadsRoot: null });
+  const refusedPurchase = await offline.renderOfflineDownload(locked, { user: lockedPeople.buyer, comicId: 5, uploadsRoot: null });
   assert.strictEqual(refusedPurchase.ok, false);
   assert.strictEqual(refusedPurchase.status, 403);
   assert.match(refusedPurchase.error, /Purchase this story/);
 
   const open = baseDb();
   const openPeople = seedStory(open, { allow: 1, purchased: true });
-  const allowed = offline.renderOfflineDownload(open, { user: openPeople.buyer, comicId: 5, uploadsRoot: null });
+  const allowed = await offline.renderOfflineDownload(open, { user: openPeople.buyer, comicId: 5, uploadsRoot: null });
   assert.strictEqual(allowed.ok, true);
   assert.strictEqual(allowed.status, 200);
   assert.match(allowed.headers['Content-Type'], /text\/html/);
@@ -140,12 +140,12 @@ function testAccess() {
   assert.ok(allowed.body.includes('localStorage'));
   assert.ok(!allowed.body.includes('fetch('));
 
-  const creatorOnly = offline.renderOfflineDownload(open, { user: openPeople.creator, comicId: 5, uploadsRoot: null });
+  const creatorOnly = await offline.renderOfflineDownload(open, { user: openPeople.creator, comicId: 5, uploadsRoot: null });
   assert.strictEqual(creatorOnly.ok, true);
 
   const adminDb = baseDb();
   const adminPeople = seedStory(adminDb, { allow: 1, purchased: false, role: 'admin' });
-  const adminOk = offline.renderOfflineDownload(adminDb, { user: adminPeople.buyer, comicId: 5, uploadsRoot: null });
+  const adminOk = await offline.renderOfflineDownload(adminDb, { user: adminPeople.buyer, comicId: 5, uploadsRoot: null });
   assert.strictEqual(adminOk.ok, true);
 
   assert.throws(
@@ -157,7 +157,7 @@ function testAccess() {
   console.log('PASS download refused when disabled or unpurchased, allowed when purchased');
 }
 
-function testEscapingAndImages() {
+async function testEscapingAndImages() {
   const db = baseDb();
   offline.ensureAllowDownloadColumn(db);
   db.prepare(`INSERT INTO users (id, username, email, role) VALUES (1, 'AuthorName', 'author@secret.test', 'user')`).run();
@@ -187,7 +187,7 @@ function testEscapingAndImages() {
   try {
     const outside = offline.localComicImagePath('/uploads/comics/../secret.txt', root);
     assert.strictEqual(outside, null);
-    const result = offline.renderOfflineDownload(db, {
+    const result = await offline.renderOfflineDownload(db, {
       user: { id: 2, username: '<img src=x onerror=alert(1)>', role: 'user' },
       comicId: 5,
       uploadsRoot: root,
@@ -209,11 +209,67 @@ function testEscapingAndImages() {
   console.log('PASS story text is escaped and images stay inside the uploads folder');
 }
 
-function main() {
+async function testUniqueImagesAndByteCap() {
+  const db = baseDb();
+  const people = seedStory(db, { allow: 1, purchased: true });
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pyp-offline-cap-'));
+  fs.mkdirSync(path.join(root, '5'), { recursive: true });
+  fs.writeFileSync(path.join(root, '5', 'dot.png'), PNG);
+  const b64 = PNG.toString('base64');
+  try {
+    assert.strictEqual(offline.OFFLINE_IMAGE_BYTE_LIMIT, 40 * 1024 * 1024);
+    assert.strictEqual(
+      offline.offlineImageTooLargeMessage(offline.OFFLINE_IMAGE_BYTE_LIMIT),
+      "This story's images are too large for an offline copy. The limit is 40 MB."
+    );
+
+    const once = await offline.renderOfflineDownload(db, {
+      user: people.buyer,
+      comicId: 5,
+      uploadsRoot: root,
+      maxImageBytes: PNG.length,
+    });
+    assert.strictEqual(once.ok, true);
+    assert.strictEqual(once.body.split(b64).length - 1, 1);
+
+    db.prepare(`UPDATE choices SET choice_image = ? WHERE from_page_id = 10`).run('/uploads/comics/5/missing.png');
+    const missing = await offline.renderOfflineDownload(db, {
+      user: people.buyer,
+      comicId: 5,
+      uploadsRoot: root,
+      maxImageBytes: PNG.length,
+    });
+    assert.strictEqual(missing.ok, true);
+    assert.strictEqual(missing.body.split(b64).length - 1, 1);
+
+    const two = Buffer.concat([PNG, PNG]);
+    fs.writeFileSync(path.join(root, '5', 'two.png'), two);
+    db.prepare(`UPDATE pages SET image_path = ? WHERE id = 11`).run('/uploads/comics/5/two.png');
+    const over = await offline.renderOfflineDownload(db, {
+      user: people.buyer,
+      comicId: 5,
+      uploadsRoot: root,
+      maxImageBytes: PNG.length,
+    });
+    assert.strictEqual(over.ok, false);
+    assert.strictEqual(over.status, 413);
+    assert.strictEqual(over.error, offline.offlineImageTooLargeMessage(PNG.length));
+    assert.match(over.error, /too large/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+  console.log('PASS each image is embedded once and oversized stories return 413');
+}
+
+async function main() {
   testMigrationRerunnable();
-  testAccess();
-  testEscapingAndImages();
+  await testAccess();
+  await testEscapingAndImages();
+  await testUniqueImagesAndByteCap();
   console.log('ALL PASS');
 }
 
-main();
+main().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});

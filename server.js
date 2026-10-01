@@ -2263,16 +2263,21 @@ app.get('/api/comics/:id/purchased', requireAuth, (req, res) => {
 
 // Self-contained offline copy. Allowed only when the creator turned downloads on
 // and the requester bought the story, owns it, or is an admin.
-app.get('/api/comics/:id/offline', requireAuth, (req, res) => {
-  const current = getCurrentUser(req);
-  const result = offlineDownload.renderOfflineDownload(db, {
-    user: current ? { id: current.id, role: current.role, username: current.username } : null,
-    comicId: parseInt(req.params.id, 10),
-    uploadsRoot: path.join(__dirname, 'uploads', 'comics'),
-  });
-  if (!result.ok) return res.status(result.status).json({ error: result.error });
-  res.set(result.headers);
-  res.send(result.body);
+app.get('/api/comics/:id/offline', requireAuth, async (req, res) => {
+  try {
+    const current = getCurrentUser(req);
+    const result = await offlineDownload.renderOfflineDownload(db, {
+      user: current ? { id: current.id, role: current.role, username: current.username } : null,
+      comicId: parseInt(req.params.id, 10),
+      uploadsRoot: path.join(__dirname, 'uploads', 'comics'),
+    });
+    if (!result.ok) return res.status(result.status).json({ error: result.error });
+    res.set(result.headers);
+    res.send(result.body);
+  } catch (err) {
+    console.error('Offline download failed', err && (err.code || err.name));
+    if (!res.headersSent) res.status(500).json({ error: 'Could not build the offline copy' });
+  }
 });
 
 // My Library — purchased + saved free + previously read (filter via ?filter=)
