@@ -307,6 +307,7 @@
               <div onclick="showAccountModal()" class="nav-desktop-only nav-desktop-flex cursor-pointer items-center gap-2 bg-slate-900 hover:bg-slate-800 px-3 py-1 rounded-2xl text-sm">
                 <div class="w-6 h-6 bg-slate-700 rounded-full flex items-center justify-center text-[10px]">${initial}</div>
                 <span class="font-medium max-w-[8rem] truncate">${displayName}${verifiedBadge}</span>
+                <span data-notice-count class="hidden ml-1 text-[10px] px-2 py-0.5 bg-blue-600 text-white rounded-full"></span>
               </div>
               <button type="button" onclick="showMyComics()" class="nav-desktop-only text-xs px-2 py-1.5 hover:bg-slate-800 rounded-xl border border-slate-700">My Stories</button>
               <button type="button" onclick="showPurchased()" class="nav-desktop-only text-xs px-2 py-1.5 hover:bg-slate-800 rounded-xl border border-slate-700">My Library</button>
@@ -325,7 +326,7 @@
                   class="hidden absolute right-0 top-full mt-1.5 w-52 py-1.5 rounded-2xl border border-slate-700 bg-slate-900 shadow-xl z-[60]">
                   <div class="px-3 py-2 border-b border-slate-800 text-[11px] text-slate-500">Credits: $${bal}</div>
                   <button type="button" class="nav-menu-item" data-nav-action="credits">Add / manage credits</button>
-                  <button type="button" class="nav-menu-item" data-nav-action="account">Account</button>
+                  <button type="button" class="nav-menu-item" data-nav-action="account">Account <span data-notice-count class="hidden ml-1 text-[10px] px-2 py-0.5 bg-blue-600 text-white rounded-full"></span></button>
                   <button type="button" class="nav-menu-item" data-nav-action="stories">My Stories</button>
                   <button type="button" class="nav-menu-item" data-nav-action="library">My Library</button>
                   ${isStaff ? '<button type="button" class="nav-menu-item" data-nav-action="review">Review Queue</button>' : ''}
@@ -336,6 +337,7 @@
             </div>
           `;
           wireNavUserMenu();
+          refreshNoticeBadge();
         } else {
           container.innerHTML = `
             <div class="flex items-center gap-1.5 sm:gap-2">
@@ -350,6 +352,142 @@
             <button type="button" onclick="showAuthModal('register')" class="px-2.5 sm:px-4 py-1 sm:py-1.5 text-xs sm:text-sm font-medium bg-white text-slate-900 rounded-2xl hover:bg-slate-100">Sign up</button>
           </div>`;
       }
+    }
+
+    async function refreshNoticeBadge() {
+      const badges = document.querySelectorAll('[data-notice-count]');
+      if (!badges.length || !currentUser) return;
+      try {
+        const res = await fetch('/api/notifications');
+        if (!res.ok) return;
+        const data = await res.json();
+        const count = Number(data.unread_count) || 0;
+        badges.forEach((el) => {
+          if (count > 0) {
+            el.textContent = String(count);
+            el.classList.remove('hidden');
+          } else {
+            el.textContent = '';
+            el.classList.add('hidden');
+          }
+        });
+      } catch (e) {}
+    }
+
+    function placeAccountNotice(notice) {
+      const card = window.PypNotices.renderNotice(notice, {
+        onRead: async () => {
+          const res = await fetch('/api/notifications/' + notice.id + '/read', { method: 'POST' });
+          if (!res.ok) return;
+          notice.unread = false;
+          const data = await res.json().catch(() => ({}));
+          if (data.read_at) notice.read_at = data.read_at;
+          const replacement = placeAccountNotice(notice);
+          card.replaceWith(replacement);
+          refreshNoticeBadge();
+        },
+        onDismiss: () => card.remove(),
+      });
+      return card;
+    }
+
+    async function loadAccountNotices() {
+      const list = document.getElementById('account-notices-list');
+      const empty = document.getElementById('account-notices-empty');
+      if (!list || !window.PypNotices) return;
+      while (list.firstChild) list.removeChild(list.firstChild);
+      try {
+        const res = await fetch('/api/notifications');
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          if (empty) {
+            empty.textContent = data.error || 'Could not load notices.';
+            empty.classList.remove('hidden');
+          }
+          return;
+        }
+        const items = Array.isArray(data.notifications) ? data.notifications : [];
+        if (empty) {
+          empty.textContent = 'No notices.';
+          empty.classList.toggle('hidden', items.length > 0);
+        }
+        items.forEach((notice) => list.appendChild(placeAccountNotice(notice)));
+      } catch (e) {
+        if (empty) {
+          empty.textContent = 'Could not load notices.';
+          empty.classList.remove('hidden');
+        }
+      }
+    }
+
+    function setNotifyStatus(message, ok) {
+      const status = document.getElementById('admin-notify-status');
+      if (!status) return;
+      status.textContent = message || '';
+      status.classList.remove('hidden', 'text-red-400', 'text-emerald-400');
+      if (!message) {
+        status.classList.add('hidden');
+        return;
+      }
+      status.classList.add(ok ? 'text-emerald-400' : 'text-red-400');
+    }
+
+    function wireAdminNotify() {
+      const panel = document.getElementById('admin-notify-panel');
+      if (!panel) return;
+      const isAdmin = currentUser && currentUser.role === 'admin';
+      panel.classList.toggle('hidden', !isAdmin);
+      if (!isAdmin || panel.dataset.wired) return;
+      panel.dataset.wired = '1';
+      let selectedUser = null;
+      const results = document.getElementById('admin-notify-results');
+      const selected = document.getElementById('admin-notify-selected');
+
+      document.getElementById('admin-notify-search').onclick = async () => {
+        setNotifyStatus('', true);
+        selectedUser = null;
+        if (selected) selected.textContent = '';
+        while (results.firstChild) results.removeChild(results.firstChild);
+        const q = document.getElementById('admin-notify-query').value.trim();
+        const res = await fetch('/api/admin/notifications/users?q=' + encodeURIComponent(q));
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) return setNotifyStatus(data.error || 'Could not search users.', false);
+        const users = Array.isArray(data.users) ? data.users : [];
+        if (!users.length) return setNotifyStatus('No matching users.', false);
+        users.forEach((user) => {
+          const button = document.createElement('button');
+          button.type = 'button';
+          button.className = 'block w-full text-left text-sm px-3 py-1.5 border border-slate-700 rounded-xl';
+          const name = user.username ? '@' + user.username : 'User ' + user.id;
+          button.textContent = name + ' · ' + (user.email || '');
+          button.onclick = () => {
+            selectedUser = user;
+            if (selected) selected.textContent = 'Sending to ' + button.textContent;
+            setNotifyStatus('', true);
+          };
+          results.appendChild(button);
+        });
+      };
+
+      document.getElementById('admin-notify-send').onclick = async () => {
+        if (!selectedUser) return setNotifyStatus('Choose a user first.', false);
+        const res = await fetch('/api/admin/notifications', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            user_id: selectedUser.id,
+            title: document.getElementById('admin-notify-title').value,
+            body: document.getElementById('admin-notify-body').value,
+            link_url: document.getElementById('admin-notify-link').value,
+          }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) return setNotifyStatus(data.error || 'Could not send notice.', false);
+        document.getElementById('admin-notify-title').value = '';
+        document.getElementById('admin-notify-body').value = '';
+        document.getElementById('admin-notify-link').value = '';
+        setNotifyStatus('Notice sent.', true);
+      };
     }
 
     function closeNavUserMenu() {
@@ -759,6 +897,18 @@
       const succ = document.getElementById('change-password-success');
       if (err) { err.classList.add('hidden'); err.textContent = ''; }
       if (succ) { succ.classList.add('hidden'); succ.textContent = ''; }
+
+      const readAll = document.getElementById('account-notices-read-all');
+      if (readAll && !readAll.dataset.wired) {
+        readAll.dataset.wired = '1';
+        readAll.onclick = async () => {
+          const res = await fetch('/api/notifications/read-all', { method: 'POST' });
+          if (!res.ok) return;
+          await loadAccountNotices();
+          refreshNoticeBadge();
+        };
+      }
+      await loadAccountNotices();
 
       // Stripe Connect
       const connectBox = document.getElementById('account-stripe-connect');
@@ -1280,6 +1430,7 @@
       document.getElementById('navbar').classList.remove('hidden');
       hideMainViews();
       document.getElementById('view-admin-reviews').classList.remove('hidden');
+      wireAdminNotify();
 
       const res = await fetch('/api/admin/pending-stories');
       const stories = await res.json();

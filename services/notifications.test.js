@@ -117,6 +117,84 @@ function testOwnRowsOnly() {
   console.log('PASS a user can only list and mark their own notices');
 }
 
+function testPlainTextRendering() {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'public', 'js', 'notices.js'), 'utf8');
+  assert.ok(!src.includes('innerHTML'));
+  assert.ok(!src.includes('insertAdjacentHTML'));
+  assert.ok(src.includes('textContent'));
+  assert.ok(src.includes('noopener noreferrer'));
+  assert.ok(src.includes('_blank'));
+
+  function make(tag) {
+    return {
+      tag,
+      className: '',
+      textContent: '',
+      href: '',
+      rel: '',
+      target: '',
+      type: '',
+      children: [],
+      listeners: {},
+      appendChild(child) { this.children.push(child); return child; },
+      addEventListener(name, fn) { this.listeners[name] = fn; },
+    };
+  }
+  global.document = { createElement: make };
+  const ui = require('../public/js/notices.js');
+  const hostile = '<script>alert(1)</script><img src=x onerror=alert(1)>';
+  let read = 0;
+  let dismissed = 0;
+  const card = ui.renderNotice({
+    id: 1,
+    title: hostile,
+    body: hostile,
+    link_url: 'https://example.com/a?x=1',
+    created_at: '2026-10-01 12:00:00',
+    unread: true,
+  }, {
+    onRead: () => { read += 1; },
+    onDismiss: () => { dismissed += 1; },
+  });
+  assert.strictEqual(card.children[0].textContent, hostile);
+  assert.strictEqual(card.children[1].textContent, hostile);
+  const link = card.children.find((child) => child.tag === 'a');
+  assert.ok(link);
+  assert.strictEqual(link.href, 'https://example.com/a?x=1');
+  assert.strictEqual(link.rel, 'noopener noreferrer');
+  assert.strictEqual(link.target, '_blank');
+  assert.strictEqual(link.textContent, 'https://example.com/a?x=1');
+  assert.ok(!card.children.some((child) => child.tag === 'script' || child.tag === 'img'));
+  const button = card.children.find((child) => child.tag === 'button');
+  assert.strictEqual(button.textContent, 'Mark read');
+  button.listeners.click();
+  assert.strictEqual(read, 1);
+  assert.strictEqual(dismissed, 0);
+
+  const plain = ui.renderNotice({
+    title: 'T',
+    body: 'B',
+    link_url: 'http://example.com',
+    unread: false,
+  }, { onDismiss: () => { dismissed += 1; } });
+  assert.ok(!plain.children.some((child) => child.tag === 'a'));
+  const dismiss = plain.children.find((child) => child.tag === 'button');
+  assert.strictEqual(dismiss.textContent, 'Dismiss');
+  dismiss.listeners.click();
+  assert.strictEqual(dismissed, 1);
+  assert.strictEqual(ui.isHttpsLink('javascript:alert(1)'), false);
+  assert.strictEqual(ui.isHttpsLink('https://user:pass@example.com/a'), false);
+
+  const app = fs.readFileSync(path.join(__dirname, '..', 'public', 'js', 'app.js'), 'utf8');
+  const start = app.indexOf('function placeAccountNotice');
+  const end = app.indexOf('function closeNavUserMenu');
+  assert.ok(start > 0 && end > start);
+  const accountUi = app.slice(start, end);
+  assert.ok(!accountUi.includes('innerHTML'));
+  assert.ok(accountUi.includes('textContent'));
+  console.log('PASS notices render as plain text with https links only');
+}
+
 function testNoEmail() {
   const src = fs.readFileSync(path.join(__dirname, 'notifications.js'), 'utf8');
   assert.ok(!/nodemailer|sendMail|mailto:/i.test(src));
@@ -127,6 +205,7 @@ function main() {
   testSchema();
   testAdminOnlyAndValidation();
   testOwnRowsOnly();
+  testPlainTextRendering();
   testNoEmail();
   console.log('ALL PASS');
 }

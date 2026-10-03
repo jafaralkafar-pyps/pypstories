@@ -2,6 +2,7 @@
 
 @source "../index.html";
 @source "../js/app.js";
+@source "../js/notices.js";
 
 /* Custom styles that were in the original <style> block */
 :root { --accent: #3b82f6; }
