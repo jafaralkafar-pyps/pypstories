@@ -11,6 +11,7 @@ const storageService = require('./services/storage');
 const credits = require('./services/credits');
 const offlineDownload = require('./services/offline-download');
 const notifications = require('./services/notifications');
+const { bareHostRedirect } = require('./services/bare-host-redirect');
 const {
   validateUsername,
   validatePublicText,
@@ -33,6 +34,7 @@ const app = express();
 
 // Behind Nginx, trust X-Forwarded-* so secure cookies / IPs work correctly
 app.set('trust proxy', 1);
+app.use(bareHostRedirect);
 
 // In dev, explicitly tell browsers never to upgrade to HTTPS for this origin.
 // This helps with the "https upgrade" errors when accessing via IP.
