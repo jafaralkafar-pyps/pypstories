@@ -10,6 +10,7 @@ const multer = require('multer');
 const storageService = require('./services/storage');
 const credits = require('./services/credits');
 const offlineDownload = require('./services/offline-download');
+const notifications = require('./services/notifications');
 const {
   validateUsername,
   validatePublicText,
@@ -120,6 +121,14 @@ const contactLimiter = rateLimit({
   windowMs: 60 * 60 * 1000, // 1 hour
   max: 8,
   message: { error: 'Too many contact messages. Please try again later.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+const adminNotifyLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 30,
+  message: { error: 'Too many notices. Please try again later.' },
   standardHeaders: true,
   legacyHeaders: false,
 });
@@ -293,6 +302,7 @@ try {
   db.exec(`ALTER TABLE comics ADD COLUMN price_cents INTEGER DEFAULT 0`);
 } catch (e) {}
 offlineDownload.ensureAllowDownloadColumn(db);
+notifications.ensureNotificationsTable(db);
 try {
   db.exec(`ALTER TABLE comics ADD COLUMN cover_image TEXT`);
 } catch (e) {}
@@ -1833,6 +1843,54 @@ app.post('/api/admin/payouts/:id/reconcile', requireAuth, requireAdmin, async (r
   } catch (e) {
     console.error('Payout reconcile failed:', e.message || e);
     res.status(400).json({ error: e.message || 'Reconcile failed' });
+  }
+});
+
+function notificationError(res, err) {
+  const status = err && err.status;
+  if (status === 400 || status === 403 || status === 404) {
+    return res.status(status).json({ error: err.message });
+  }
+  console.error('Notification request failed');
+  return res.status(500).json({ error: 'Could not complete that request' });
+}
+
+app.get('/api/admin/notifications/users', requireAuth, requireAdmin, (req, res) => {
+  try {
+    res.json({ users: notifications.searchUsers(db, req.query.q) });
+  } catch (err) {
+    notificationError(res, err);
+  }
+});
+
+app.post('/api/admin/notifications', requireAuth, requireAdmin, adminNotifyLimiter, (req, res) => {
+  try {
+    const admin = getCurrentUser(req);
+    const created = notifications.createNotification(db, admin, req.body || {});
+    console.log('Admin notification sent', {
+      admin_id: admin && admin.id,
+      user_id: created.user_id,
+      notification_id: created.id,
+    });
+    res.status(201).json({ notification: created });
+  } catch (err) {
+    notificationError(res, err);
+  }
+});
+
+app.get('/api/notifications', requireAuth, (req, res) => {
+  res.json(notifications.listForUser(db, req.session.userId));
+});
+
+app.post('/api/notifications/read-all', requireAuth, (req, res) => {
+  res.json(notifications.markAllRead(db, req.session.userId));
+});
+
+app.post('/api/notifications/:id/read', requireAuth, (req, res) => {
+  try {
+    res.json(notifications.markRead(db, req.session.userId, req.params.id));
+  } catch (err) {
+    notificationError(res, err);
   }
 });
 
