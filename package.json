@@ -1,7 +1,7 @@
 {
   "name": "pick-your-path-stories",
   "version": "0.1.0",
-  "description": "Pick Your Path Stories - Upload and read choose-your-own-adventure stories and comics",
+  "description": "Pick Your Path Stories - Upload and read branching stories and comics",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
@@ -10,8 +10,7 @@
     "watch:css": "tailwindcss -i ./public/css/input.css -o ./public/css/tailwind.css --watch"
   },
   "keywords": [
-    "cyoa",
-    "choose-your-own-adventure",
+    "branching-stories",
     "interactive",
     "stories",
     "comics"

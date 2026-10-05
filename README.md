@@ -1,6 +1,6 @@
 # Pick Your Path Stories • PYPStories.com
 
-A secure platform for uploading and reading **choose-your-own-adventure** stories and illustrated comics.
+A secure platform for uploading and reading **branching stories** and illustrated comics.
 
 **Important:** This application is designed to handle sensitive user data (passwords, emails, and eventually payments). Follow security best practices below.
 
