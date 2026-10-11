@@ -23,7 +23,7 @@ const path = require('path');
 const crypto = require('crypto');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
-const nodemailer = require('nodemailer');
+const { sendEmail } = require('./services/mail');
 const Stripe = require('stripe');
 
 const PORT = process.env.PORT || 3000;
@@ -714,118 +714,8 @@ if (!process.env.STORAGE_TYPE || process.env.STORAGE_TYPE === 'local') {
   app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 }
 
-// === EMAIL SETUP ===
-// Supports: Mailtrap, Resend, generic SMTP, or Ethereal (dev fallback)
-let emailClient = null;
-
-async function getEmailClient() {
-  if (emailClient) return emailClient;
-
-  // Mailtrap (great for dev testing)
-  if (process.env.MAILTRAP_USER && process.env.MAILTRAP_PASS) {
-    const nodemailer = require('nodemailer');
-    emailClient = {
-      type: 'mailtrap',
-      send: async (mailOptions) => {
-        const transporter = nodemailer.createTransport({
-          host: "sandbox.smtp.mailtrap.io",
-          port: 2525,
-          auth: {
-            user: process.env.MAILTRAP_USER,
-            pass: process.env.MAILTRAP_PASS,
-          },
-        });
-        try {
-          const info = await transporter.sendMail(mailOptions);
-          console.log('📧 Mailtrap email sent successfully. Check your Mailtrap inbox: https://mailtrap.io');
-          return info;
-        } catch (mailErr) {
-          console.error('Mailtrap send failed:', mailErr.message);
-          if (mailErr.code === 'EAUTH' || mailErr.message.includes('Invalid credentials')) {
-            console.error('>>> Check your MAILTRAP_USER and MAILTRAP_PASS in .env. Make sure they are the SMTP credentials from your Mailtrap inbox (not your login password).');
-          }
-          throw mailErr;
-        }
-      }
-    };
-    console.log('📧 Using Mailtrap for emails');
-    return emailClient;
-  }
-
-  // Resend (clean for production)
-  if (process.env.RESEND_API_KEY) {
-    const { Resend } = require('resend');
-    const resend = new Resend(process.env.RESEND_API_KEY);
-    emailClient = {
-      type: 'resend',
-      send: async (mailOptions) => {
-        const { data, error } = await resend.emails.send({
-          from: mailOptions.from,
-          to: mailOptions.to,
-          subject: mailOptions.subject,
-          html: mailOptions.html,
-        });
-        if (error) throw error;
-        console.log('📧 Email sent via Resend');
-        return data;
-      }
-    };
-    console.log('📧 Using Resend for emails');
-    return emailClient;
-  }
-
-  // Generic nodemailer SMTP
-  if (process.env.EMAIL_USER && process.env.EMAIL_PASS) {
-    const nodemailer = require('nodemailer');
-    const transporter = nodemailer.createTransport({
-      host: process.env.EMAIL_HOST || 'smtp.ethereal.email',
-      port: parseInt(process.env.EMAIL_PORT || '587'),
-      secure: false,
-      auth: {
-        user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_PASS,
-      },
-    });
-    emailClient = {
-      type: 'smtp',
-      send: (opts) => transporter.sendMail(opts)
-    };
-    return emailClient;
-  }
-
-  // Fallback: Ethereal (development)
-  const nodemailer = require('nodemailer');
-  const testAccount = await nodemailer.createTestAccount();
-  const transporter = nodemailer.createTransport({
-    host: 'smtp.ethereal.email',
-    port: 587,
-    secure: false,
-    auth: {
-      user: testAccount.user,
-      pass: testAccount.pass,
-    },
-  });
-  emailClient = {
-    type: 'ethereal',
-    send: async (mailOptions) => {
-      const info = await transporter.sendMail(mailOptions);
-      const previewUrl = nodemailer.getTestMessageUrl(info);
-      console.log('\n📧 [DEV] Email sent via Ethereal (fake SMTP)');
-      console.log(`   To: ${mailOptions.to}`);
-      console.log(`   Subject: ${mailOptions.subject}`);
-      console.log(`   👉 Open this link to view the email: ${previewUrl}\n`);
-      return info;
-    }
-  };
-  console.log('📧 Using Ethereal (dev) - check console for preview links');
-  return emailClient;
-}
-
-async function sendEmail(to, subject, html) {
-  const client = await getEmailClient();
-  const from = process.env.EMAIL_FROM || '"Pick Your Path Stories" <no-reply@pypstories.com>';
-  return client.send({ from, to, subject, html });
-}
+// === EMAIL ===
+// Transports live in services/mail.js (Mailtrap, Resend, SMTP, or Ethereal).
 
 async function sendVerificationEmail(email, token) {
   const verifyUrl = `${APP_URL}/verify?token=${token}`;
