@@ -4478,6 +4478,46 @@
       }
     }
 
+    function bindStaticControls() {
+      var brand = document.getElementById('nav-brand');
+      if (brand) brand.addEventListener('click', function () { showHome(); });
+      var browse = document.getElementById('nav-browse');
+      if (browse) browse.addEventListener('click', function () { showBrowse(); });
+      var login = document.getElementById('nav-login');
+      if (login) login.addEventListener('click', function () { showAuthModal('login'); });
+      var signup = document.getElementById('nav-signup');
+      if (signup) signup.addEventListener('click', function () { showAuthModal('register'); });
+      var searchForm = document.getElementById('catalog-search-form');
+      if (searchForm) searchForm.addEventListener('submit', function (event) { event.preventDefault(); });
+      var searchInput = document.getElementById('search-input');
+      if (searchInput) {
+        searchInput.addEventListener('focus', function () { searchInput.removeAttribute('readonly'); });
+        searchInput.addEventListener('input', debounceSearch);
+      }
+      var genre = document.getElementById('genre-filter');
+      if (genre) genre.addEventListener('change', function () { loadComics(); });
+      var sort = document.getElementById('sort-filter');
+      if (sort) sort.addEventListener('change', function () { loadComics(); });
+      var create = document.getElementById('new-story-btn');
+      if (create) create.addEventListener('click', function () { showCreateComic(); });
+      var readerPanel = document.getElementById('reader-modal-panel');
+      if (readerPanel) readerPanel.addEventListener('click', function (event) { event.stopImmediatePropagation(); });
+      var readerClose = document.getElementById('reader-close');
+      if (readerClose) readerClose.addEventListener('click', function () { closeReader(); });
+      var readerRestart = document.getElementById('reader-restart');
+      if (readerRestart) readerRestart.addEventListener('click', function () { restartStory(); });
+      var infoModal = document.getElementById('comic-info-modal');
+      if (infoModal) {
+        infoModal.addEventListener('click', function (event) {
+          if (event.target.id === 'comic-info-modal') closeComicInfo();
+        });
+      }
+      var infoPanel = document.getElementById('comic-info-panel');
+      if (infoPanel) infoPanel.addEventListener('click', function (event) { event.stopImmediatePropagation(); });
+      var infoClose = document.getElementById('comic-info-close');
+      if (infoClose) infoClose.addEventListener('click', function () { closeComicInfo(); });
+    }
+
     // Expose handlers used by inline onclick attributes
     window.previewComic = previewComic;
     window.showContactModal = showContactModal;
@@ -4507,5 +4547,6 @@
     window.showAdminReviews = showAdminReviews;
 
     // Boot
+    bindStaticControls();
     window.onload = init;
   
