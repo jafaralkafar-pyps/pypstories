@@ -1,15 +1,19 @@
-# https://pypstories.com/robots.txt
+# https://www.pypstories.com/robots.txt
 User-agent: *
 Allow: /
 Allow: /terms.html
+Allow: /privacy.html
 Allow: /content-policy.html
+Allow: /how-it-works.html
+Allow: /contact.html
 Allow: /brand/
 Allow: /css/
 Allow: /js/
+Allow: /uploads/comics/
 
 # App/API and private app surfaces — not for Google Search results
 Disallow: /api/
 Disallow: /uploads/
 
-# Prefer the clean homepage URL (canonical is https://pypstories.com/)
-Sitemap: https://pypstories.com/sitemap.xml
+# Canonical host is https://www.pypstories.com/
+Sitemap: https://www.pypstories.com/sitemap.xml

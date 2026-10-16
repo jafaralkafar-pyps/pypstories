@@ -6,7 +6,8 @@
   <title>How It Works · Pick Your Path Stories</title>
   <meta name="description" content="How PYPStories works for readers and creators: branching comics, free samples, credits, and building stories online.">
   <meta name="robots" content="index, follow">
-  <link rel="canonical" href="https://pypstories.com/how-it-works.html">
+  <link rel="canonical" href="https://www.pypstories.com/how-it-works.html">
+  <meta name="google-adsense-account" content="ca-pub-9811413201474824">
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/css/tailwind.css">
   <style>
@@ -68,6 +69,16 @@
     <p>
       Whether you showed up to <strong>read Sleeper</strong> (or the next story that lands on the shelf) or to
       <strong>build your own branching comic</strong>, this page explains the basics.
+    </p>
+
+    <h2 id="about">About PYPStories</h2>
+    <p>
+      Pick Your Path Stories is run by the PYPStories team. We publish a family-friendly place to read
+      <strong>branching stories</strong>: illustrated pages that end in a choice, so the path you take changes what happens next.
+    </p>
+    <p>
+      Creators can write and sell their own stories. After a story passes review, they set a price or offer a free sample,
+      and readers pay through Stripe. The creator keeps their work; the platform handles accounts, review, and checkout.
     </p>
 
     <h2>For readers</h2>
@@ -189,8 +200,8 @@
     </p>
     <h3>What if I get stuck building a story?</h3>
     <p>
-      Use the short checklist on the Create Story screen, watch the tutorial video when available, or use
-      <strong>Contact us</strong> in the footer on the <a href="/">home page</a>.
+      Use the short checklist on the Create Story screen, watch the tutorial video when available, or
+      <a href="/contact.html">contact us</a>.
       We’re building for people who love stories more than software manuals.
     </p>
     <h3>Is this only for comics?</h3>
@@ -210,8 +221,26 @@
       Related:
       <a href="/content-policy.html">Content Policy</a> ·
       <a href="/terms.html">Terms of Service</a> ·
+      <a href="/privacy.html">Privacy</a> ·
       <a href="/">Home</a>
     </p>
   </main>
+
+  <footer class="border-t border-slate-800 mt-8 py-8 text-center text-xs sm:text-sm text-slate-500">
+    <div class="max-w-3xl mx-auto px-4 sm:px-6 space-y-2">
+      <p class="text-slate-400 font-medium">Pick Your Path Stories · PYPStories.com</p>
+      <p>Branching stories · Interactive comics · Webtoon-style paths · Digital books</p>
+      <p class="flex flex-wrap items-center justify-center gap-x-4 gap-y-2">
+        <a href="/" class="text-slate-400 hover:text-blue-300 underline underline-offset-2">Home</a>
+        <a href="/how-it-works.html" class="text-slate-400 hover:text-blue-300 underline underline-offset-2">How It Works</a>
+        <a href="/privacy.html" class="text-slate-400 hover:text-blue-300 underline underline-offset-2">Privacy</a>
+        <a href="/terms.html" class="text-slate-400 hover:text-blue-300 underline underline-offset-2">Terms</a>
+        <a href="/content-policy.html" class="text-slate-400 hover:text-blue-300 underline underline-offset-2">Content Policy</a>
+        <a href="/contact.html" class="text-slate-400 hover:text-blue-300 underline underline-offset-2">Contact</a>
+      </p>
+      <p class="text-slate-600">© <span id="footer-year"></span> PYPStories. Read a path or create your own. Family-friendly interactive stories.</p>
+    </div>
+  </footer>
+  <script>document.getElementById('footer-year').textContent = new Date().getFullYear();</script>
 </body>
 </html>

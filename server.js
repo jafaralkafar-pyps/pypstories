@@ -12,6 +12,7 @@ const credits = require('./services/credits');
 const offlineDownload = require('./services/offline-download');
 const notifications = require('./services/notifications');
 const { bareHostRedirect } = require('./services/bare-host-redirect');
+const publicPages = require('./services/public-pages');
 const {
   validateUsername,
   validatePublicText,
@@ -706,8 +707,12 @@ app.use(session({
   }
 }));
 
-// Serve frontend
-app.use(express.static(path.join(__dirname, 'public')));
+// Homepage, story pages, sitemap, and /about must be registered before static
+// so express.static does not serve the empty index or a stale sitemap.
+const publicDir = path.join(__dirname, 'public');
+const indexPath = path.join(publicDir, 'index.html');
+publicPages.mountEarlyRoutes(app, { db, indexPath });
+app.use(express.static(publicDir));
 
 // Serve uploads only for local storage (PoC). Cloud storage will use CDN URLs.
 if (!process.env.STORAGE_TYPE || process.env.STORAGE_TYPE === 'local') {
@@ -3363,31 +3368,10 @@ app.get('/api/pages/:id', (req, res) => {
   res.json(page);
 });
 
-// === SERVE THE APP ===
-// SPA fallback + robust static asset serving.
-// This ensures CSS/JS always load even if the main static middleware has issues
-// (e.g. when accessing via IP address on some network setups).
+// Unknown paths are a real 404. The app shell is only returned for /, /browse,
+// /search/:username, /verify, and /reset-password.
 app.use((req, res) => {
-  const reqPath = req.path;
-
-  // Never serve HTML for API or uploads
-  if (reqPath.startsWith('/api') || reqPath.startsWith('/uploads')) {
-    return res.status(404).json({ error: 'Not found' });
-  }
-
-  // For asset files (css, js, images, etc.), try to serve them directly from public.
-  // This acts as a fallback / safety net for IP access.
-  if (/\.(css|js|map|png|jpg|jpeg|gif|svg|ico|woff|woff2|ttf|eot)$/i.test(reqPath)) {
-    const filePath = path.join(__dirname, 'public', reqPath);
-    return res.sendFile(filePath, (err) => {
-      if (err) {
-        res.status(404).send('Asset not found');
-      }
-    });
-  }
-
-  // Everything else (page routes) -> serve the SPA index.html
-  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+  publicPages.handleFallback(req, res, { db, publicDir, indexPath });
 });
 
 // Listen on all interfaces so LAN/phone access still works if needed

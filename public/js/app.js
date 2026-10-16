@@ -536,6 +536,7 @@
     }
 
     function showAuthModal(tab) {
+      if (typeof window.ensurePrivatePanels === 'function') window.ensurePrivatePanels();
       document.getElementById('auth-modal').classList.remove('hidden');
       clearAuthForms();
       switchAuthTab(tab === 'register' ? 'register' : 'login');
@@ -874,6 +875,7 @@
     }
 
     async function showAccount() {
+      if (typeof window.ensurePrivatePanels === 'function') window.ensurePrivatePanels();
       if (!currentUser) return showAuthModal();
 
       await closeStructureBuilder({ save: true });
@@ -1068,7 +1070,9 @@
       if (sort) params.append('sort', sort);
 
       const res = await fetch('/api/comics?' + params.toString());
-      allComics = await res.json();
+      const data = await res.json();
+      if (!Array.isArray(data)) return;
+      allComics = data;
 
       renderComicsGrid(allComics, document.getElementById('comics-grid'), true);
 
@@ -1089,6 +1093,16 @@
       return Number.isFinite(cents) && cents >= 599;
     }
 
+    function storyPublicPath(comic) {
+      const slug = String((comic && comic.title) || 'story')
+        .toLowerCase()
+        .replace(/['’]/g, '')
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '')
+        .slice(0, 80);
+      return '/story/' + comic.id + '/' + (slug || 'story');
+    }
+
     function renderComicsGrid(comics, container, showEmpty = true) {
       container.innerHTML = '';
       const emptyEl = document.getElementById('browse-empty');
@@ -1100,11 +1114,13 @@
       if (emptyEl) emptyEl.classList.add('hidden');
 
       comics.forEach(comic => {
-        const card = document.createElement('div');
-        card.className = `comic-card bg-slate-900 border border-slate-800 rounded-3xl overflow-hidden cursor-pointer flex flex-col`;
+        const card = document.createElement('a');
+        card.href = storyPublicPath(comic);
+        card.className = 'comic-card bg-slate-900 border border-slate-800 rounded-3xl overflow-hidden cursor-pointer flex flex-col';
         
+        const coverAlt = String(comic.title || 'Story cover').replace(/"/g, '&quot;');
         const imgHtml = comic.cover_image 
-          ? `<img src="${comic.cover_image}" class="w-full h-full object-contain bg-slate-950" alt="">` 
+          ? `<img src="${comic.cover_image}" class="w-full h-full object-contain bg-slate-950" alt="${coverAlt}">` 
           : `<div class="h-full w-full bg-gradient-to-br from-slate-800 to-slate-900 flex items-center justify-center text-5xl opacity-40">ðŸ“–</div>`;
 
         card.innerHTML = `
@@ -4027,6 +4043,7 @@
     }
 
     async function showCreditsModal() {
+      if (typeof window.ensurePrivatePanels === 'function') window.ensurePrivatePanels();
       if (!currentUser) {
         showAuthModal();
         return;
@@ -4077,7 +4094,9 @@
     }
 
     function closeCreditsModal() {
-      document.getElementById('credits-modal').classList.add('hidden');
+      if (typeof window.ensurePrivatePanels === 'function') window.ensurePrivatePanels();
+      const modal = document.getElementById('credits-modal');
+      if (modal) modal.classList.add('hidden');
     }
 
     function restartStory() {
@@ -4098,6 +4117,7 @@
 
     // Init
     async function init() {
+      if (typeof window.ensurePrivatePanels === 'function') window.ensurePrivatePanels();
       initTailwind();
       await loadPublicConfig();
       
@@ -4206,8 +4226,10 @@
       const browseGrid = document.getElementById('comics-grid');
       if (browseGrid) {
         browseGrid.addEventListener('click', (e) => {
+          if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
           const card = e.target.closest('.comic-card');
           if (card && card.dataset.comicId) {
+            e.preventDefault();
             showComicInfo(parseInt(card.dataset.comicId, 10));
           }
         });
@@ -4376,7 +4398,11 @@
 
       if (Number.isFinite(deepComicId) && deepComicId > 0) {
         try {
-          await showComicInfo(deepComicId);
+          if (urlParams.get('start') === '1') {
+            await openReader(deepComicId);
+          } else {
+            await showComicInfo(deepComicId);
+          }
         } catch (e) {
           console.error('Deep link comic failed', e);
         }
@@ -4385,32 +4411,7 @@
     }
 
     function showContactModal() {
-      const modal = document.getElementById('contact-modal');
-      if (!modal) return;
-      const err = document.getElementById('contact-error');
-      const ok = document.getElementById('contact-success');
-      if (err) { err.classList.add('hidden'); err.textContent = ''; }
-      if (ok) { ok.classList.add('hidden'); ok.textContent = ''; }
-      const form = document.getElementById('contact-form');
-      if (form) form.reset();
-      const count = document.getElementById('contact-msg-count');
-      if (count) count.textContent = '0';
-      // Prefill email if logged in
-      const emailEl = document.getElementById('contact-email');
-      const nameEl = document.getElementById('contact-name');
-      if (currentUser) {
-        if (emailEl && currentUser.email) emailEl.value = currentUser.email;
-        if (nameEl && currentUser.username) nameEl.value = currentUser.username;
-      }
-      modal.classList.remove('hidden');
-      const msg = document.getElementById('contact-message');
-      if (msg && !msg.dataset.bound) {
-        msg.dataset.bound = '1';
-        msg.addEventListener('input', () => {
-          const c = document.getElementById('contact-msg-count');
-          if (c) c.textContent = String((msg.value || '').length);
-        });
-      }
+      window.location.assign('/contact.html');
     }
 
     function closeContactModal() {

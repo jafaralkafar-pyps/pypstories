@@ -3,6 +3,12 @@
 @source "../index.html";
 @source "../js/app.js";
 @source "../js/notices.js";
+@source "../js/private-panels.js";
+@source "../privacy.html";
+@source "../contact.html";
+@source "../how-it-works.html";
+@source "../terms.html";
+@source "../content-policy.html";
 
 /* Custom styles that were in the original <style> block */
 :root { --accent: #3b82f6; }
