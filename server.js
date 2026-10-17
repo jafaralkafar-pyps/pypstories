@@ -13,6 +13,7 @@ const offlineDownload = require('./services/offline-download');
 const notifications = require('./services/notifications');
 const { bareHostRedirect } = require('./services/bare-host-redirect');
 const publicPages = require('./services/public-pages');
+const readAccess = require('./services/read-access');
 const {
   validateUsername,
   validatePublicText,
@@ -2854,44 +2855,10 @@ app.delete('/api/comics/:id', requireAuth, requireAdmin, (req, res) => {
 
 // === PAGES & CHOICES ===
 
-// Get all pages + choices for a comic (for reader + editor)
+// Full pages for buyers, creators, admins, and reviewers. Published paid
+// stories otherwise return the free sample only.
 app.get('/api/comics/:id/pages', (req, res) => {
-  const comicId = req.params.id;
-  const currentUser = getCurrentUser(req);
-
-  const comic = db.prepare('SELECT id, user_id, reviewed_by, status FROM comics WHERE id = ?').get(comicId);
-  if (comic && !userCanViewComic(req, comic)) {
-    return res.status(403).json({ error: 'Not available' });
-  }
-
-  const pages = db.prepare('SELECT * FROM pages WHERE comic_id = ? ORDER BY id ASC').all(comicId);
-
-  const choices = db.prepare(`
-    SELECT ch.*, p_from.id as from_id
-    FROM choices ch
-    JOIN pages p_from ON p_from.id = ch.from_page_id
-    WHERE p_from.comic_id = ?
-  `).all(comicId);
-
-  // Attach choices to pages
-  const pageMap = {};
-  pages.forEach(p => {
-    p.choices = [];
-    pageMap[p.id] = p;
-  });
-
-  choices.forEach(ch => {
-    if (pageMap[ch.from_page_id]) {
-      pageMap[ch.from_page_id].choices.push({
-        id: ch.id,
-        text: ch.choice_text,
-        to_page_id: ch.to_page_id,
-        image: ch.choice_image || null
-      });
-    }
-  });
-
-  res.json({ pages });
+  readAccess.handleComicPages(req, res, { db, user: getCurrentUser(req) });
 });
 
 // Upload a new page for a comic
@@ -3335,37 +3302,14 @@ app.get('/api/genres', (req, res) => {
   res.json(['All', ...genres.map(g => g.genre)]);
 });
 
-// Start page for reader
+// Start page for reader. Same sample rule as the pages list.
 app.get('/api/comics/:id/start', (req, res) => {
-  const comicId = req.params.id;
-  let startPage = db.prepare('SELECT * FROM pages WHERE comic_id = ? AND is_start = 1 LIMIT 1').get(comicId);
-  
-  if (!startPage) {
-    startPage = db.prepare('SELECT * FROM pages WHERE comic_id = ? ORDER BY id LIMIT 1').get(comicId);
-  }
-  
-  if (!startPage) return res.status(404).json({ error: 'No pages yet' });
-
-  // Load its choices
-  startPage.choices = db.prepare(`
-    SELECT choice_text as text, to_page_id, choice_image as image 
-    FROM choices WHERE from_page_id = ?
-  `).all(startPage.id);
-
-  res.json(startPage);
+  readAccess.handleStartPage(req, res, { db, user: getCurrentUser(req) });
 });
 
-// Get a single page with choices (for navigation)
+// One page plus its choices. Non-sample pages of a paid story are 403.
 app.get('/api/pages/:id', (req, res) => {
-  const page = db.prepare('SELECT * FROM pages WHERE id = ?').get(req.params.id);
-  if (!page) return res.status(404).json({ error: 'Page not found' });
-
-  page.choices = db.prepare(`
-    SELECT choice_text as text, to_page_id, choice_image as image 
-    FROM choices WHERE from_page_id = ?
-  `).all(page.id);
-
-  res.json(page);
+  readAccess.handlePageById(req, res, { db, user: getCurrentUser(req) });
 });
 
 // Unknown paths are a real 404. The app shell is only returned for /, /browse,

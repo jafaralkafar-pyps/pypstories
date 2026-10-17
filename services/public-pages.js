@@ -4,6 +4,7 @@
  */
 const fs = require('fs');
 const path = require('path');
+const { findStartPage } = require('./read-access');
 
 const CANONICAL_ORIGIN = 'https://www.pypstories.com';
 const ADSENSE_ACCOUNT = 'ca-pub-9811413201474824';
@@ -261,8 +262,8 @@ function formatPageText(value) {
 function selectSamplePages(pages, choices) {
   const pageList = (Array.isArray(pages) ? pages : []).slice()
     .sort((a, b) => Number(a.id) - Number(b.id));
-  if (!pageList.length) return [];
-  const start = pageList.find((page) => Number(page.is_start)) || pageList[0];
+  const start = findStartPage(pageList);
+  if (!start) return [];
   const choiceRows = Array.isArray(choices) ? choices : [];
   const fromStart = choiceRows
     .filter((choice) => Number(choice.from_page_id) === Number(start.id))

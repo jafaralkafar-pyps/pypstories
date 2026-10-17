@@ -3216,6 +3216,62 @@
     const FREE_CHOICES = 1;
     let pageHistory = [];
 
+    function clearReaderSurface() {
+      const img = document.getElementById('reader-image');
+      const placeholder = document.getElementById('reader-image-placeholder');
+      if (img) img.style.display = 'none';
+      if (placeholder) placeholder.style.display = 'flex';
+      const text = document.getElementById('reader-text');
+      if (text) text.textContent = '';
+      const progress = document.getElementById('reader-progress');
+      if (progress) progress.textContent = '';
+    }
+
+    function showSampleEndedPaywall() {
+      const choicesContainer = document.getElementById('reader-choices');
+      if (!choicesContainer) return;
+      choicesContainer.innerHTML = '';
+      const paywall = document.createElement('div');
+      paywall.className = 'p-4 bg-slate-800 border border-amber-600 rounded-2xl text-center';
+      const price = readerComic && readerComic.price ? readerComic.price : '??';
+      paywall.innerHTML = `
+          <div class="font-medium mb-1">Sample Ended</div>
+          <div class="text-sm text-slate-400 mb-3">The first choice is free. Buy to continue the full story.</div>
+          <button class="px-6 py-2 bg-white text-slate-900 rounded-2xl text-sm font-medium">Buy for $${price}</button>
+        `;
+      const buyBtn = paywall.querySelector('button');
+      const comicId = readerComic && readerComic.id;
+      if (buyBtn) buyBtn.onclick = () => { if (comicId) purchaseComic(comicId); };
+      choicesContainer.appendChild(paywall);
+    }
+
+    async function refetchOpenReaderPages(comicId) {
+      const modal = document.getElementById('reader-modal');
+      const open = modal && !modal.classList.contains('hidden')
+        && readerComic && Number(readerComic.id) === Number(comicId);
+      if (!open) return false;
+      const pagesRes = await fetch(`/api/comics/${comicId}/pages`);
+      if (!pagesRes.ok) {
+        showSampleEndedPaywall();
+        return false;
+      }
+      const data = await pagesRes.json().catch(() => ({}));
+      readerAllPages = data.pages || [];
+      hasPurchasedComic = true;
+      const currentId = currentReaderPage && currentReaderPage.id;
+      const fresh = readerAllPages.find((p) => Number(p.id) === Number(currentId));
+      if (fresh) {
+        renderReaderPage(fresh);
+        return true;
+      }
+      const start = readerAllPages.find((p) => p.is_start) || readerAllPages[0];
+      if (start) {
+        pageHistory = [];
+        renderReaderPage(start);
+      }
+      return true;
+    }
+
     // === COMIC INFO MODAL (title + description shown first on browse) ===
     let infoModalComicId = null;
     let infoModalChapters = [];
@@ -3769,10 +3825,33 @@
       document.getElementById('navbar').classList.remove('hidden');
 
       const res = await fetch(`/api/comics/${comicId}`);
+      if (!res.ok) {
+        readerComic = { id: comicId, title: 'Story', price: null, author: '' };
+        readerAllPages = [];
+        hasPurchasedComic = false;
+        document.getElementById('reader-comic-title').textContent = 'Story';
+        document.getElementById('reader-author').textContent = '';
+        document.getElementById('reader-modal').classList.remove('hidden');
+        clearReaderSurface();
+        showSampleEndedPaywall();
+        return;
+      }
       readerComic = await res.json();
 
-      // fetch full pages
+      // fetch pages (full story, or the server sample when the story is paid)
       const pagesRes = await fetch(`/api/comics/${comicId}/pages`);
+      if (!pagesRes.ok) {
+        readerAllPages = [];
+        hasPurchasedComic = false;
+        const lockedOwner = currentUser && readerComic.author === currentUser.username;
+        const lockedPrice = readerComic.price && !lockedOwner ? readerComic.price : null;
+        document.getElementById('reader-comic-title').textContent = (readerComic.title || 'Story') + (lockedPrice ? ` ($${lockedPrice})` : '');
+        document.getElementById('reader-author').textContent = readerComic.author ? ('by ' + readerComic.author) : '';
+        document.getElementById('reader-modal').classList.remove('hidden');
+        clearReaderSurface();
+        showSampleEndedPaywall();
+        return;
+      }
       const data = await pagesRes.json();
       readerAllPages = data.pages || [];
 
@@ -3807,6 +3886,9 @@
       if (currentUser && readerComic.reviewed_by && Number(currentUser.id) === Number(readerComic.reviewed_by)) {
         hasPurchasedComic = true;
       }
+      if (currentUser && (currentUser.role === 'admin' || currentUser.role === 'editor')) {
+        hasPurchasedComic = true;
+      }
 
       const isOwner = currentUser && readerComic.author === currentUser.username;
       const displayPrice = readerComic.price && !isOwner ? readerComic.price : null;
@@ -3838,6 +3920,11 @@
     }
 
     function renderReaderPage(page) {
+      if (!page || page.error || page.id == null) {
+        clearReaderSurface();
+        showSampleEndedPaywall();
+        return;
+      }
       currentReaderPage = page;
 
       const isFirstPage = !!page.is_start;
@@ -3891,31 +3978,22 @@
         }
       }
 
-      // Choices
+      // Choices. The paywall runs before "The End" so a page with its later
+      // choices removed still shows Sample Ended on a paid story.
       const choicesContainer = document.getElementById('reader-choices');
       choicesContainer.innerHTML = '';
+
+      const isSampleLimited = !hasPurchasedComic && choicesMade >= FREE_CHOICES && readerComic && readerComic.price && !isFirstPage;
+      if (isSampleLimited || page.locked) {
+        showSampleEndedPaywall();
+        return;
+      }
 
       if (!page.choices || !page.choices.length) {
         const end = document.createElement('div');
         end.className = 'text-center py-2 text-emerald-400 text-sm';
         end.textContent = '— The End —';
         choicesContainer.appendChild(end);
-        return;
-      }
-
-      const isSampleLimited = !hasPurchasedComic && choicesMade >= FREE_CHOICES && readerComic.price && !isFirstPage;
-
-      if (isSampleLimited) {
-        const paywall = document.createElement('div');
-        paywall.className = 'p-4 bg-slate-800 border border-amber-600 rounded-2xl text-center';
-        paywall.innerHTML = `
-          <div class="font-medium mb-1">Sample Ended</div>
-          <div class="text-sm text-slate-400 mb-3">The first choice is free. Buy to continue the full story.</div>
-          <button class="px-6 py-2 bg-white text-slate-900 rounded-2xl text-sm font-medium">Buy for $${readerComic.price || '??'}</button>
-        `;
-        const buyBtn = paywall.querySelector('button');
-        buyBtn.onclick = () => purchaseComic(readerComic.id);
-        choicesContainer.appendChild(paywall);
         return;
       }
 
@@ -3976,16 +4054,33 @@
             choicesMade++;
           }
 
+          if (choice.locked || choice.to_page_id == null || choice.to_page_id === '') {
+            showSampleEndedPaywall();
+            return;
+          }
+
           const target = readerAllPages.find(p => p.id === choice.to_page_id);
           if (target) {
             renderReaderPage(target);
-          } else {
+            return;
+          }
+          try {
             const r = await fetch(`/api/pages/${choice.to_page_id}`);
+            if (!r.ok) {
+              showSampleEndedPaywall();
+              return;
+            }
             const fresh = await r.json();
+            if (!fresh || fresh.error || fresh.id == null) {
+              showSampleEndedPaywall();
+              return;
+            }
             const existingIdx = readerAllPages.findIndex(p => p.id === fresh.id);
             if (existingIdx >= 0) readerAllPages[existingIdx] = fresh;
             else readerAllPages.push(fresh);
             renderReaderPage(fresh);
+          } catch (e) {
+            showSampleEndedPaywall();
           }
         };
         choicesContainer.appendChild(btn);
@@ -4016,7 +4111,8 @@
             alert('Story unlocked with credits!');
             await updateAuthUI();
             hasPurchasedComic = true;
-            openReader(comicId);
+            const stayed = await refetchOpenReaderPages(comicId);
+            if (!stayed) await openReader(comicId);
             return;
           }
         } else if (priceCents > 0 && bal < priceCents) {
@@ -4033,7 +4129,8 @@
           window.location.href = data.url;
         } else if (data.success) {
           hasPurchasedComic = true;
-          openReader(comicId);
+          const stayed = await refetchOpenReaderPages(comicId);
+          if (!stayed) await openReader(comicId);
         } else if (data.error) {
           alert(data.error);
         }
@@ -4214,7 +4311,7 @@
             }
             hasPurchasedComic = true;
             alert('Thank you! You can now read the full story.');
-            if (currentReaderPage) renderReaderPage(currentReaderPage);
+            refetchOpenReaderPages(purchasedComic);
           }).catch(() => {
             clearPurchaseParams();
             alert('Could not confirm this purchase. If you were charged, contact support.');
