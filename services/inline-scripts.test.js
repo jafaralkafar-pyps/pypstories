@@ -48,8 +48,16 @@ function buildDb() {
     CREATE TABLE pages (
       id INTEGER PRIMARY KEY,
       comic_id INTEGER,
+      title TEXT,
       image_path TEXT,
+      text_content TEXT,
       is_start INTEGER
+    );
+    CREATE TABLE choices (
+      id INTEGER PRIMARY KEY,
+      from_page_id INTEGER,
+      choice_text TEXT,
+      to_page_id INTEGER
     );
   `);
   db.prepare('INSERT INTO users (id, username) VALUES (1, ?)').run('ada');

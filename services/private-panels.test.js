@@ -127,7 +127,7 @@ function main() {
     assert.ok(!idsFrom(indexHtml).has(id), 'logged-out index.html still contains #' + id);
   });
 
-  assert.ok(panelsSrc.includes(mainIndexBlock()), 'create-modal HTML differs from main');
+  assert.ok(panelsSrc.replace(/\r\n/g, '\n').includes(mainIndexBlock()), 'create-modal HTML differs from main');
   assert.ok(panelsSrc.includes('if (root.document && root.document.body) ensurePrivatePanels();'));
 
   const createdByApp = new Set();

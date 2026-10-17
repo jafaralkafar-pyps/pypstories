@@ -9,6 +9,9 @@ Allow: /contact.html
 Allow: /brand/
 Allow: /css/
 Allow: /js/
+# Covers are /uploads/comics/{id}/cover-* and page art is /uploads/comics/{id}/{file}.
+# Which pages are the free sample is stored on the story, not in the path, so this
+# prefix is as narrow as the files allow for teaser images and covers.
 Allow: /uploads/comics/
 
 # App/API and private app surfaces — not for Google Search results

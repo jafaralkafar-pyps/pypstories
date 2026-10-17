@@ -172,6 +172,21 @@ function pageDocument(options) {
     .prose p, .prose li { color: #94a3b8; font-size: 0.9375rem; line-height: 1.65; }
     .prose a { color: #60a5fa; text-decoration: underline; }
     .prose a.button-link { color: #0f172a; text-decoration: none; }
+    .teaser-text { white-space: pre-line; }
+    .teaser-image { position: relative; display: block; margin: 1rem 0; }
+    .teaser-image img { display: block; width: 100%; height: auto; border-radius: 1rem; }
+    .teaser-image::after {
+      content: "PYPStories.com";
+      position: absolute;
+      right: 0.75rem;
+      bottom: 0.6rem;
+      font-size: 0.75rem;
+      line-height: 1;
+      color: rgba(255, 255, 255, 0.55);
+      text-shadow: 0 1px 2px rgba(0, 0, 0, 0.55);
+      pointer-events: none;
+    }
+    .teaser-choices { list-style: disc; padding-left: 1.25rem; }
   </style>
 </head>
 <body class="bg-slate-950 text-slate-200 min-h-screen">
@@ -235,7 +250,98 @@ function renderHomeFromFile(indexPath, stories) {
   return renderHomeHtml(template, stories);
 }
 
-function renderStoryPage(story) {
+// Reader FREE_CHOICES is 1: the start page, then one chosen page. The landing
+// page uses that same cap for paid and free stories.
+const SAMPLE_CHOICE_LIMIT = 1;
+
+function formatPageText(value) {
+  return escapeHtml(value).replace(/\r\n/g, '\n').replace(/\n/g, '<br>');
+}
+
+function selectSamplePages(pages, choices) {
+  const pageList = (Array.isArray(pages) ? pages : []).slice()
+    .sort((a, b) => Number(a.id) - Number(b.id));
+  if (!pageList.length) return [];
+  const start = pageList.find((page) => Number(page.is_start)) || pageList[0];
+  const choiceRows = Array.isArray(choices) ? choices : [];
+  const fromStart = choiceRows
+    .filter((choice) => Number(choice.from_page_id) === Number(start.id))
+    .slice()
+    .sort((a, b) => Number(a.id) - Number(b.id));
+  const selected = [start];
+  if (SAMPLE_CHOICE_LIMIT > 0 && fromStart.length) {
+    const next = pageList.find((page) => Number(page.id) === Number(fromStart[0].to_page_id));
+    if (next && Number(next.id) !== Number(start.id)) selected.push(next);
+  }
+  return selected.map((page) => ({
+    id: page.id,
+    title: page.title || '',
+    image_path: page.image_path || '',
+    text_content: page.text_content || '',
+    is_start: page.is_start,
+    choices: choiceRows
+      .filter((choice) => Number(choice.from_page_id) === Number(page.id))
+      .slice()
+      .sort((a, b) => Number(a.id) - Number(b.id))
+      .map((choice) => ({
+        text: choice.choice_text != null ? choice.choice_text : (choice.text || ''),
+      })),
+  }));
+}
+
+function loadSamplePages(db, comicId) {
+  const pages = db.prepare(`
+    SELECT id, title, image_path, text_content, is_start
+    FROM pages
+    WHERE comic_id = ?
+    ORDER BY id ASC
+  `).all(comicId);
+  const choices = db.prepare(`
+    SELECT ch.id, ch.from_page_id, ch.choice_text, ch.to_page_id
+    FROM choices ch
+    JOIN pages p ON p.id = ch.from_page_id
+    WHERE p.comic_id = ?
+    ORDER BY ch.id ASC
+  `).all(comicId);
+  return selectSamplePages(pages, choices);
+}
+
+function readerLink(comicId, label) {
+  return `<a href="/?comic=${Number(comicId)}&amp;start=1" class="button-link inline-block px-5 py-2.5 bg-white text-slate-900 rounded-2xl font-medium no-underline">${escapeHtml(label)}</a>`;
+}
+
+function renderTeaserHtml(story, samplePages) {
+  if (!samplePages || !samplePages.length) return '';
+  const title = story.title || 'Untitled';
+  const articles = samplePages.map((page) => {
+    const pageTitle = String(page.title || '').trim();
+    const alt = pageTitle ? (title + ' — ' + pageTitle) : title;
+    const src = safeImageSrc(page.image_path);
+    const image = src
+      ? `<div class="teaser-image"><img src="${escapeHtml(src)}" alt="${escapeHtml(alt)}"></div>`
+      : '';
+    const heading = pageTitle ? `<h3>${escapeHtml(pageTitle)}</h3>` : '';
+    const text = String(page.text_content || '').trim()
+      ? `<p class="teaser-text">${formatPageText(page.text_content)}</p>`
+      : '';
+    const items = (page.choices || [])
+      .map((choice) => String(choice.text || '').trim())
+      .filter(Boolean)
+      .map((label) => `<li>${escapeHtml(label)}</li>`)
+      .join('');
+    const choices = items
+      ? `<p class="teaser-prompt">What would you do?</p><ul class="teaser-choices">${items}</ul>`
+      : '';
+    return `<article class="teaser-page">${heading}${image}${text}${choices}</article>`;
+  }).join('\n');
+  return `<section class="story-teaser" aria-label="Story sample">
+    <h2>Sample</h2>
+    <p>The opening of this branching story.</p>
+    ${articles}
+  </section>`;
+}
+
+function renderStoryPage(story, samplePages) {
   const pathName = storyPath(story.id, story.title);
   const title = story.title || 'Untitled';
   const author = story.author || 'unknown';
@@ -246,6 +352,11 @@ function renderStoryPage(story) {
     ? `<img src="${escapeHtml(cover)}" alt="${escapeHtml(title)}" class="w-full rounded-2xl border border-slate-800 bg-slate-950 mb-6">`
     : '';
   const bodyText = plainText(story.description, 4000);
+  const teaser = renderTeaserHtml(story, samplePages || []);
+  const afterTeaser = teaser
+    ? `<p class="mt-6">${readerLink(story.id, 'Start reading')}</p>
+    <p class="mt-3">${readerLink(story.id, 'Keep reading in the app')}</p>`
+    : '';
   return pageDocument({
     title: title + ' · Pick Your Path Stories',
     description,
@@ -256,9 +367,9 @@ function renderStoryPage(story) {
     <p class="text-sm text-slate-400 mb-6">by ${escapeHtml(author)}</p>
     ${image}
     <p>${escapeHtml(bodyText || 'A branching story on Pick Your Path Stories.')}</p>
-    <p class="mt-6">
-      <a href="/?comic=${Number(story.id)}&amp;start=1" class="button-link inline-block px-5 py-2.5 bg-white text-slate-900 rounded-2xl font-medium no-underline">Start reading</a>
-    </p>`,
+    <p class="mt-6">${readerLink(story.id, 'Start reading')}</p>
+    ${teaser}
+    ${afterTeaser}`,
   });
 }
 
@@ -320,8 +431,10 @@ function mountEarlyRoutes(app, options) {
       return sendHtml(res, 404, renderNotFound());
     }
     let story;
+    let samplePages = [];
     try {
       story = getPublishedStory(db, id);
+      if (story) samplePages = loadSamplePages(db, story.id);
     } catch (err) {
       console.error('Story page failed', (err && (err.code || err.name)) || 'error');
       return res.status(500).type('text/plain').send('Could not load that story');
@@ -330,7 +443,7 @@ function mountEarlyRoutes(app, options) {
     if (req.params.slug !== storySlug(story.title)) {
       return res.redirect(301, storyPath(story.id, story.title));
     }
-    sendHtml(res, 200, renderStoryPage(story));
+    sendHtml(res, 200, renderStoryPage(story, samplePages));
   }
 
   app.get('/story/:id', sendStoryPage);
@@ -389,6 +502,9 @@ module.exports = {
   renderCatalogHtml,
   renderHomeHtml,
   renderHomeFromFile,
+  SAMPLE_CHOICE_LIMIT,
+  selectSamplePages,
+  loadSamplePages,
   renderStoryPage,
   renderSitemap,
   mountEarlyRoutes,

@@ -56,8 +56,16 @@ function buildDb() {
     CREATE TABLE pages (
       id INTEGER PRIMARY KEY,
       comic_id INTEGER,
+      title TEXT,
       image_path TEXT,
+      text_content TEXT,
       is_start INTEGER
+    );
+    CREATE TABLE choices (
+      id INTEGER PRIMARY KEY,
+      from_page_id INTEGER,
+      choice_text TEXT,
+      to_page_id INTEGER
     );
   `);
   db.prepare('INSERT INTO users (id, username) VALUES (?, ?)').run(1, 'ada');
@@ -90,6 +98,64 @@ function buildDb() {
   );
   db.prepare('INSERT INTO pages (id, comic_id, image_path, is_start) VALUES (?, ?, ?, ?)')
     .run(9, 3, '/uploads/comics/page-cover.png', 1);
+
+  db.prepare(`
+    INSERT INTO comics (id, user_id, title, description, genre, cover_image, status, submitted_at, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    4, 1, 'Paid Trail',
+    'A paid branching story about a trail.',
+    'Fantasy', '/uploads/comics/4/cover-paid.png', 'published',
+    '2026-10-03 12:00:00', '2026-09-03 12:00:00'
+  );
+  db.prepare(`
+    INSERT INTO pages (id, comic_id, title, image_path, text_content, is_start)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `).run(10, 4, 'Trailhead', '/uploads/comics/4/start.png', 'Moss & <script>alert(1)</script>\nYou stand at the trailhead.', 1);
+  db.prepare(`
+    INSERT INTO pages (id, comic_id, title, image_path, text_content, is_start)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `).run(11, 4, 'Left fork', '/uploads/comics/4/left.png', 'The left fork is mossy and quiet.', 0);
+  db.prepare(`
+    INSERT INTO pages (id, comic_id, title, image_path, text_content, is_start)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `).run(12, 4, 'Right fork', '/uploads/comics/4/right-secret.png', 'RIGHT_SECRET_TEXT should not appear', 0);
+  db.prepare(`
+    INSERT INTO pages (id, comic_id, title, image_path, text_content, is_start)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `).run(13, 4, 'Deep woods', '/uploads/comics/4/deep-secret.png', 'DEEP_SECRET_TEXT should not appear', 0);
+  db.prepare('INSERT INTO choices (id, from_page_id, choice_text, to_page_id) VALUES (?, ?, ?, ?)')
+    .run(1, 10, 'Walk the left fork', 11);
+  db.prepare('INSERT INTO choices (id, from_page_id, choice_text, to_page_id) VALUES (?, ?, ?, ?)')
+    .run(2, 10, 'Walk the <right> fork', 12);
+  db.prepare('INSERT INTO choices (id, from_page_id, choice_text, to_page_id) VALUES (?, ?, ?, ?)')
+    .run(3, 11, 'Continue into the deep woods', 13);
+
+  db.prepare(`
+    INSERT INTO comics (id, user_id, title, description, genre, cover_image, status, submitted_at, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    5, 1, 'Open Meadow',
+    'A free branching story.',
+    'Adventure', '', 'published',
+    '2026-10-04 12:00:00', '2026-09-04 12:00:00'
+  );
+  db.prepare(`
+    INSERT INTO pages (id, comic_id, title, image_path, text_content, is_start)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `).run(20, 5, 'Gate', '', 'FREE_START_TEXT', 1);
+  db.prepare(`
+    INSERT INTO pages (id, comic_id, title, image_path, text_content, is_start)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `).run(21, 5, 'Meadow', '', 'FREE_NEXT_TEXT', 0);
+  db.prepare(`
+    INSERT INTO pages (id, comic_id, title, image_path, text_content, is_start)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `).run(22, 5, 'Far ridge', '', 'FREE_SECRET_TEXT', 0);
+  db.prepare('INSERT INTO choices (id, from_page_id, choice_text, to_page_id) VALUES (?, ?, ?, ?)')
+    .run(4, 20, 'Step into the meadow', 21);
+  db.prepare('INSERT INTO choices (id, from_page_id, choice_text, to_page_id) VALUES (?, ?, ?, ?)')
+    .run(5, 21, 'Climb the far ridge', 22);
   return db;
 }
 
@@ -250,6 +316,7 @@ async function main() {
     assert.ok(story.body.includes('href="/?comic=1&amp;start=1"'));
     assert.ok(story.body.includes('Start reading'));
     assert.ok(story.body.includes('https://www.pypstories.com/story/1/readers-forest'));
+    assert.ok(story.body.includes('content="A branching walk where the path you pick changes the ending."'));
     assertAds(story.body, 'story');
     assertFooter(story.body, 'story');
     assertNoTrademark(story.body, 'story');
@@ -269,6 +336,46 @@ async function main() {
 
     const absent = await request(server, '/story/99/missing');
     assert.strictEqual(absent.status, 404);
+
+    const paid = await request(server, '/story/4/paid-trail');
+    assert.strictEqual(paid.status, 200);
+    assert.ok(paid.body.includes('content="A paid branching story about a trail."'));
+    assert.ok(paid.body.includes('ca-pub-9811413201474824'));
+    assert.ok(paid.body.includes('https://www.pypstories.com/story/4/paid-trail'));
+    assert.ok(paid.body.includes('You stand at the trailhead.'));
+    assert.ok(paid.body.includes('The left fork is mossy and quiet.'));
+    assert.ok(paid.body.includes('Moss &amp; &lt;script&gt;alert(1)&lt;/script&gt;'));
+    assert.ok(!paid.body.includes('<script>alert(1)</script>'));
+    assert.ok(!paid.body.includes('RIGHT_SECRET_TEXT'));
+    assert.ok(!paid.body.includes('DEEP_SECRET_TEXT'));
+    assert.ok(!paid.body.includes('/uploads/comics/4/right-secret.png'));
+    assert.ok(!paid.body.includes('/uploads/comics/4/deep-secret.png'));
+    assert.ok(!paid.body.includes('Right fork'));
+    assert.ok(!paid.body.includes('Deep woods'));
+    assert.ok(paid.body.includes('class="teaser-image"'));
+    assert.ok(paid.body.includes('alt="Paid Trail — Trailhead"'));
+    assert.ok(paid.body.includes('alt="Paid Trail — Left fork"'));
+    assert.ok(paid.body.includes('content: "PYPStories.com"'));
+    assert.ok(paid.body.includes('<li>Walk the left fork</li>'));
+    assert.ok(paid.body.includes('<li>Walk the &lt;right&gt; fork</li>'));
+    assert.ok(paid.body.includes('<li>Continue into the deep woods</li>'));
+    const choiceLists = paid.body.match(/<ul class="teaser-choices">[\s\S]*?<\/ul>/g) || [];
+    assert.ok(choiceLists.length >= 1);
+    choiceLists.forEach((list) => assert.ok(!/<a\b/i.test(list), list));
+    assert.ok(!paid.body.includes('/api/'));
+    assert.ok(paid.body.includes('href="/?comic=4&amp;start=1"'));
+    assert.ok(paid.body.includes('>Start reading</a>'));
+    assert.ok(paid.body.includes('>Keep reading in the app</a>'));
+    assert.ok(paid.body.includes('branching story'));
+    assert.ok(!/choose your own adventure/i.test(paid.body));
+    assert.ok(!paid.body.includes('CYOA'));
+
+    const freeStory = await request(server, '/story/5/open-meadow');
+    assert.strictEqual(freeStory.status, 200);
+    assert.ok(freeStory.body.includes('FREE_START_TEXT'));
+    assert.ok(freeStory.body.includes('FREE_NEXT_TEXT'));
+    assert.ok(!freeStory.body.includes('FREE_SECRET_TEXT'));
+    assert.ok(!freeStory.body.includes('Far ridge'));
 
     const pageCover = await request(server, '/story/3/page-cover');
     assert.strictEqual(pageCover.status, 200);
