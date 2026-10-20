@@ -503,8 +503,10 @@
     }
 
     let selectNotifyUser = () => {};
+    let contactOldestId = null;
+    let contactListGen = 0;
 
-    function loadAdminContactMessages() {
+    function loadAdminContactMessages(beforeId) {
       const panel = document.getElementById('admin-contact-panel');
       if (!panel) return;
       const isAdmin = currentUser && currentUser.role === 'admin';
@@ -512,16 +514,37 @@
       if (!isAdmin) return;
       const list = document.getElementById('admin-contact-list');
       const empty = document.getElementById('admin-contact-empty');
+      const older = document.getElementById('admin-contact-older');
       if (!list) return;
-      list.textContent = '';
-      fetch('/api/admin/contact-messages')
+      if (older && older.dataset.wired !== '1') {
+        older.dataset.wired = '1';
+        older.onclick = () => {
+          if (contactOldestId) loadAdminContactMessages(contactOldestId);
+        };
+      }
+      const append = beforeId != null && beforeId !== '';
+      const gen = ++contactListGen;
+      if (!append) {
+        list.textContent = '';
+        contactOldestId = null;
+        if (older) older.classList.add('hidden');
+      }
+      let url = '/api/admin/contact-messages';
+      if (append) url += '?before=' + encodeURIComponent(beforeId);
+      fetch(url)
         .then((res) => res.json().catch(() => ({})).then((data) => ({ ok: res.ok, data })))
         .then(({ ok, data }) => {
+          if (gen !== contactListGen) return;
           const messages = ok && Array.isArray(data.messages) ? data.messages : [];
-          list.textContent = '';
+          if (!append) list.textContent = '';
           if (empty) {
-            empty.textContent = ok ? 'No contact messages.' : (data.error || 'Could not load contact messages.');
-            empty.classList.toggle('hidden', ok && messages.length > 0);
+            if (!ok) {
+              empty.textContent = data.error || 'Could not load contact messages.';
+              empty.classList.remove('hidden');
+            } else if (!append) {
+              empty.textContent = 'No contact messages.';
+              empty.classList.toggle('hidden', messages.length > 0);
+            }
           }
           messages.forEach((item) => {
             const card = document.createElement('article');
@@ -532,7 +555,7 @@
             who.textContent = (item.name || '') + ' · ' + (item.email || '') + linked;
             const when = document.createElement('p');
             when.className = 'text-xs text-slate-500 mt-1';
-            when.textContent = item.created_at || '';
+            when.textContent = item.created_label || '';
             const body = document.createElement('p');
             body.className = 'text-sm text-slate-300 whitespace-pre-line mt-2';
             body.textContent = item.message || '';
@@ -555,8 +578,11 @@
             }
             list.appendChild(card);
           });
+          if (messages.length) contactOldestId = messages[messages.length - 1].id;
+          if (older) older.classList.toggle('hidden', !(ok && data.has_more === true));
         })
         .catch(() => {
+          if (gen !== contactListGen) return;
           if (empty) {
             empty.textContent = 'Could not load contact messages.';
             empty.classList.remove('hidden');

@@ -357,9 +357,10 @@ try {
   db.exec(`ALTER TABLE choices ADD COLUMN choice_image TEXT`);
 } catch (e) {}
 
-// Contact form submissions. user_id is set when the sender is logged in.
-// Older databases gain that nullable column here. The site may still email
-// the operator; the visitor is not emailed a reply.
+// Contact form submissions. Schema runs once here, not on each submit.
+// user_id is set when the sender is logged in. Older databases gain that
+// nullable column here. The site may still email the operator; the visitor
+// is not emailed a reply.
 contactMessages.ensureContactMessagesTable(db);
 
 // Ratings & comments (chapter_id = 0 means whole story)

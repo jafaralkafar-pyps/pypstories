@@ -1,6 +1,8 @@
 /**
  * Contact-form storage and the admin list.
  * Replies to visitors are in-site notices. This module does not send email.
+ * ensureContactMessagesTable runs once at server startup. Saves and lists
+ * do not create or alter the table.
  */
 
 const RECENT_LIMIT = 50;
@@ -37,8 +39,34 @@ function normalizeUserId(userId) {
   return id;
 }
 
+function formatCreatedAt(value) {
+  if (value == null) return '';
+  const raw = String(value).trim();
+  if (!raw) return '';
+  const iso = /[zZ]|[+-]\d{2}:?\d{2}$/.test(raw) ? raw : raw.replace(' ', 'T') + 'Z';
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return raw;
+  const formatted = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/Chicago',
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  }).format(date);
+  return formatted + ' CT';
+}
+
+function parseBeforeId(value) {
+  if (value == null || value === '') return null;
+  const text = String(value).trim();
+  if (!/^[1-9]\d*$/.test(text)) throw fail(400, 'Invalid before');
+  const id = Number(text);
+  if (!Number.isInteger(id) || id <= 0) throw fail(400, 'Invalid before');
+  return id;
+}
+
 function saveContactMessage(db, input) {
-  ensureContactMessagesTable(db);
   const payload = input || {};
   const name = String(payload.name || '').trim().slice(0, 80);
   const email = String(payload.email || '').trim().toLowerCase().slice(0, 120);
@@ -55,9 +83,16 @@ function saveContactMessage(db, input) {
   `).get(result.lastInsertRowid);
 }
 
-function listContactMessages(db, actor) {
+function listContactMessages(db, actor, options) {
   if (!actor || actor.role !== 'admin') throw fail(403, 'Admin access required');
-  ensureContactMessagesTable(db);
+  const beforeId = parseBeforeId(options && options.before);
+  const params = [];
+  let where = '';
+  if (beforeId != null) {
+    where = 'WHERE m.id < ?';
+    params.push(beforeId);
+  }
+  params.push(RECENT_LIMIT + 1);
   const rows = db.prepare(`
     SELECT
       m.id,
@@ -70,19 +105,26 @@ function listContactMessages(db, actor) {
       u.email AS account_email
     FROM contact_messages m
     LEFT JOIN users u ON u.id = m.user_id
+    ${where}
     ORDER BY m.id DESC
     LIMIT ?
-  `).all(RECENT_LIMIT);
-  return rows.map((row) => ({
-    id: row.id,
-    name: row.name,
-    email: row.email,
-    message: row.message,
-    created_at: row.created_at,
-    user_id: row.user_id == null ? null : row.user_id,
-    username: row.username || null,
-    account_email: row.account_email || null,
-  }));
+  `).all(...params);
+  const hasMore = rows.length > RECENT_LIMIT;
+  const page = hasMore ? rows.slice(0, RECENT_LIMIT) : rows;
+  return {
+    messages: page.map((row) => ({
+      id: row.id,
+      name: row.name,
+      email: row.email,
+      message: row.message,
+      created_at: row.created_at,
+      created_label: formatCreatedAt(row.created_at),
+      user_id: row.user_id == null ? null : row.user_id,
+      username: row.username || null,
+      account_email: row.account_email || null,
+    })),
+    has_more: hasMore,
+  };
 }
 
 function handleList(req, res, ctx) {
@@ -90,7 +132,8 @@ function handleList(req, res, ctx) {
   if (!user) return res.status(401).json({ error: 'Not logged in' });
   if (user.role !== 'admin') return res.status(403).json({ error: 'Admin access required' });
   try {
-    res.json({ messages: listContactMessages(ctx.db, user) });
+    const before = req.query ? req.query.before : null;
+    res.json(listContactMessages(ctx.db, user, { before }));
   } catch (err) {
     const status = err && err.status;
     if (status === 400 || status === 403) return res.status(status).json({ error: err.message });
