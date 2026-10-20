@@ -268,8 +268,9 @@ async function main() {
 
     const contact = await request(server, '/contact.html');
     assert.strictEqual(contact.status, 200);
-    assert.ok(contact.body.includes('mailto:contact@pypstories.com'));
-    assert.ok(contact.body.includes('contact@pypstories.com'));
+    assert.ok(contact.body.includes('We read every message. If you have a PYPStories account, we\'ll reply with an in-site notice. Log in first so we can match your message to your account.'));
+    assert.ok(!contact.body.includes('contact@'));
+    assert.ok(!/mailto:/i.test(contact.body));
     assert.ok(contact.body.includes('/api/contact'));
     assert.ok(contact.body.includes('id="contact-form"'));
     assertAds(contact.body, 'contact');

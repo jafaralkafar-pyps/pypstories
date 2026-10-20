@@ -488,6 +488,80 @@
         document.getElementById('admin-notify-link').value = '';
         setNotifyStatus('Notice sent.', true);
       };
+
+      selectNotifyUser = (user) => {
+        if (!user || !user.id) return;
+        selectedUser = user;
+        const name = user.username ? '@' + user.username : 'User ' + user.id;
+        if (selected) selected.textContent = 'Sending to ' + name + ' · ' + (user.email || '');
+        setNotifyStatus('', true);
+        panel.classList.remove('hidden');
+        const title = document.getElementById('admin-notify-title');
+        if (title) title.focus();
+        panel.scrollIntoView({ block: 'start' });
+      };
+    }
+
+    let selectNotifyUser = () => {};
+
+    function loadAdminContactMessages() {
+      const panel = document.getElementById('admin-contact-panel');
+      if (!panel) return;
+      const isAdmin = currentUser && currentUser.role === 'admin';
+      panel.classList.toggle('hidden', !isAdmin);
+      if (!isAdmin) return;
+      const list = document.getElementById('admin-contact-list');
+      const empty = document.getElementById('admin-contact-empty');
+      if (!list) return;
+      list.textContent = '';
+      fetch('/api/admin/contact-messages')
+        .then((res) => res.json().catch(() => ({})).then((data) => ({ ok: res.ok, data })))
+        .then(({ ok, data }) => {
+          const messages = ok && Array.isArray(data.messages) ? data.messages : [];
+          list.textContent = '';
+          if (empty) {
+            empty.textContent = ok ? 'No contact messages.' : (data.error || 'Could not load contact messages.');
+            empty.classList.toggle('hidden', ok && messages.length > 0);
+          }
+          messages.forEach((item) => {
+            const card = document.createElement('article');
+            card.className = 'border border-slate-800 rounded-2xl p-3';
+            const who = document.createElement('p');
+            who.className = 'text-sm text-slate-200';
+            const linked = item.username ? ' · @' + item.username : ' · No account linked';
+            who.textContent = (item.name || '') + ' · ' + (item.email || '') + linked;
+            const when = document.createElement('p');
+            when.className = 'text-xs text-slate-500 mt-1';
+            when.textContent = item.created_at || '';
+            const body = document.createElement('p');
+            body.className = 'text-sm text-slate-300 whitespace-pre-line mt-2';
+            body.textContent = item.message || '';
+            card.appendChild(who);
+            card.appendChild(when);
+            card.appendChild(body);
+            if (item.user_id && item.username) {
+              const button = document.createElement('button');
+              button.type = 'button';
+              button.className = 'mt-3 px-4 py-2 bg-blue-600 hover:bg-blue-500 rounded-xl text-sm font-medium';
+              button.textContent = 'Send notice';
+              button.onclick = () => {
+                selectNotifyUser({
+                  id: item.user_id,
+                  username: item.username,
+                  email: item.account_email || item.email || '',
+                });
+              };
+              card.appendChild(button);
+            }
+            list.appendChild(card);
+          });
+        })
+        .catch(() => {
+          if (empty) {
+            empty.textContent = 'Could not load contact messages.';
+            empty.classList.remove('hidden');
+          }
+        });
     }
 
     function closeNavUserMenu() {
@@ -1447,6 +1521,7 @@
       hideMainViews();
       document.getElementById('view-admin-reviews').classList.remove('hidden');
       wireAdminNotify();
+      loadAdminContactMessages();
 
       const res = await fetch('/api/admin/pending-stories');
       const stories = await res.json();

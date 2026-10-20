@@ -1,4 +1,26 @@
 // Loaded from /js so production CSP script-src 'self' can run it.
+var accountPrefill = null;
+
+function applyAccountPrefill() {
+  if (!accountPrefill) return;
+  var nameEl = document.getElementById('contact-name');
+  var emailEl = document.getElementById('contact-email');
+  if (nameEl && !nameEl.value && accountPrefill.username) nameEl.value = accountPrefill.username;
+  if (emailEl && !emailEl.value && accountPrefill.email) emailEl.value = accountPrefill.email;
+}
+
+fetch('/api/me', { credentials: 'same-origin' })
+  .then(function (r) { return r.json(); })
+  .then(function (data) {
+    if (!data || !data.user) return;
+    accountPrefill = {
+      username: data.user.username || '',
+      email: data.user.email || ''
+    };
+    applyAccountPrefill();
+  })
+  .catch(function () {});
+
 var msg = document.getElementById('contact-message');
 msg.addEventListener('input', function () {
   document.getElementById('contact-msg-count').textContent = String((msg.value || '').length);
@@ -50,6 +72,7 @@ document.getElementById('contact-form').addEventListener('submit', function (eve
     ok.classList.remove('hidden');
     document.getElementById('contact-form').reset();
     document.getElementById('contact-msg-count').textContent = '0';
+    applyAccountPrefill();
   }).catch(function () {
     err.textContent = 'Network error. Please try again.';
     err.classList.remove('hidden');

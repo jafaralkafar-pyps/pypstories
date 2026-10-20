@@ -11,6 +11,7 @@ const storageService = require('./services/storage');
 const credits = require('./services/credits');
 const offlineDownload = require('./services/offline-download');
 const notifications = require('./services/notifications');
+const contactMessages = require('./services/contact-messages');
 const { bareHostRedirect } = require('./services/bare-host-redirect');
 const publicPages = require('./services/public-pages');
 const readAccess = require('./services/read-access');
@@ -356,17 +357,10 @@ try {
   db.exec(`ALTER TABLE choices ADD COLUMN choice_image TEXT`);
 } catch (e) {}
 
-// Contact form submissions (also emailed when mail is configured)
-db.exec(`
-  CREATE TABLE IF NOT EXISTS contact_messages (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL,
-    email TEXT NOT NULL,
-    message TEXT NOT NULL,
-    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-    ip TEXT
-  );
-`);
+// Contact form submissions. user_id is set when the sender is logged in.
+// Older databases gain that nullable column here. The site may still email
+// the operator; the visitor is not emailed a reply.
+contactMessages.ensureContactMessagesTable(db);
 
 // Ratings & comments (chapter_id = 0 means whole story)
 db.exec(`
@@ -1814,12 +1808,16 @@ app.post('/api/contact', contactLimiter, async (req, res) => {
   }
 
   const ip = String(req.ip || req.headers['x-forwarded-for'] || '').slice(0, 80);
+  const sender = getCurrentUser(req);
 
   try {
-    db.prepare(`
-      INSERT INTO contact_messages (name, email, message, ip)
-      VALUES (?, ?, ?, ?)
-    `).run(name, email, message, ip);
+    contactMessages.saveContactMessage(db, {
+      name,
+      email,
+      message,
+      ip,
+      userId: sender ? sender.id : null,
+    });
   } catch (e) {
     console.error('Contact save failed:', e);
     return res.status(500).json({ error: 'Could not save your message. Please try again.' });
@@ -1861,8 +1859,13 @@ app.post('/api/contact', contactLimiter, async (req, res) => {
 
   res.json({
     success: true,
-    message: 'Thanks! Your message was sent. We’ll get back to you by email if a reply is needed.',
+    message: contactMessages.CONTACT_SUCCESS,
   });
+});
+
+// Recent contact messages. Admin only. Replies go out as in-site notices.
+app.get('/api/admin/contact-messages', requireAuth, requireAdmin, (req, res) => {
+  contactMessages.handleList(req, res, { db, user: getCurrentUser(req) });
 });
 
 // Public client config (AdSense IDs are meant to be public in page source)
