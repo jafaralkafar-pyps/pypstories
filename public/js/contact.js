@@ -1,10 +1,9 @@
 // Loaded from /js so production CSP script-src 'self' can run it.
 var accountPrefill = null;
-var loadedAtMs = Date.now();
 var loadedAtField = document.getElementById('contact-loaded-at');
 
 function stampLoadedAt() {
-  if (loadedAtField) loadedAtField.value = String(loadedAtMs);
+  if (loadedAtField) loadedAtField.value = String(Date.now());
 }
 stampLoadedAt();
 

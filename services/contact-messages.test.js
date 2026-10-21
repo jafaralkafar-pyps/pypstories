@@ -434,6 +434,39 @@ async function main() {
   assert.ok(latest().flag_reason.includes(contactGuard.FLAG_LINKS));
   assert.strictEqual(sent.length, 2);
 
+  const withinSkew = contactGuard.inspectContactSubmission({
+    loadedAt: String(now + 60 * 1000),
+    name: 'Ada',
+    message: base.message,
+  }, now);
+  assert.strictEqual(withinSkew.flagged, false);
+  assert.strictEqual(withinSkew.drop, false);
+  const atSkewLimit = contactGuard.inspectContactSubmission({
+    loadedAt: String(now + contactGuard.CLOCK_SKEW_MS),
+    name: 'Ada',
+    message: base.message,
+  }, now);
+  assert.strictEqual(atSkewLimit.flagged, false);
+  const pastSkew = contactGuard.inspectContactSubmission({
+    loadedAt: String(now + contactGuard.CLOCK_SKEW_MS + 1),
+    name: 'Ada',
+    message: base.message,
+  }, now);
+  assert.strictEqual(pastSkew.flagged, true);
+  assert.strictEqual(pastSkew.flagReason, contactGuard.FLAG_INVALID);
+
+  const skewed = await submit({ loaded_at: String(now + 60 * 1000) });
+  assert.strictEqual(skewed.payload.success, true);
+  assert.strictEqual(latest().flagged, 0);
+  assert.strictEqual(latest().flag_reason, null);
+  assert.strictEqual(sent.length, 3);
+
+  const tooAhead = await submit({ loaded_at: String(now + contactGuard.CLOCK_SKEW_MS + 1) });
+  assert.strictEqual(tooAhead.payload.success, true);
+  assert.strictEqual(latest().flagged, 1);
+  assert.strictEqual(latest().flag_reason, contactGuard.FLAG_INVALID);
+  assert.strictEqual(sent.length, 3);
+
   const flaggedList = contactMessages.listContactMessages(spamDb, { id: 4, role: 'admin' });
   const fastRow = flaggedList.messages.find((row) => row.flag_reason === contactGuard.FLAG_FAST);
   assert.ok(fastRow);
@@ -533,7 +566,10 @@ async function main() {
   assert.ok(contactJs.includes('contact-name'));
   assert.ok(contactJs.includes('contact-email'));
   assert.ok(contactJs.includes('applyAccountPrefill'));
-  assert.ok(contactJs.includes('Date.now()'));
+  const stampAt = contactJs.indexOf('function stampLoadedAt');
+  const stampFn = contactJs.slice(stampAt, contactJs.indexOf('function applyAccountPrefill'));
+  assert.ok(stampFn.includes('Date.now()'));
+  assert.ok(!stampFn.includes('loadedAtMs'));
   assert.ok(contactJs.includes('stampLoadedAt'));
   assert.ok(contactJs.includes('loaded_at'));
   assert.ok(contactJs.includes('website'));

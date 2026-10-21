@@ -10,6 +10,7 @@ const contactMessages = require('./contact-messages');
 const { validatePublicText } = require('./moderation');
 
 const MIN_FILL_MS = 3000;
+const CLOCK_SKEW_MS = 5 * 60 * 1000;
 const MAX_LINKS = 2;
 const CONTACT_RATE_MAX = 5;
 const CONTACT_RATE_WINDOW_MS = 60 * 60 * 1000;
@@ -45,9 +46,12 @@ function inspectContactSubmission(input, nowMs) {
     reasons.push(FLAG_INVALID);
   } else {
     const loaded = Number(raw);
-    if (!Number.isFinite(loaded) || loaded <= 0 || loaded > now) {
+    const ahead = loaded - now;
+    // A clock a few minutes fast is still a real submit. Only a timestamp
+    // more than five minutes ahead is invalid. A small lead is not "too fast".
+    if (!Number.isFinite(loaded) || loaded <= 0 || ahead > CLOCK_SKEW_MS) {
       reasons.push(FLAG_INVALID);
-    } else if (now - loaded < MIN_FILL_MS) {
+    } else if (ahead <= 0 && now - loaded < MIN_FILL_MS) {
       reasons.push(FLAG_FAST);
     }
   }
@@ -169,6 +173,7 @@ async function handleContactPost(req, res, ctx) {
 
 module.exports = {
   MIN_FILL_MS,
+  CLOCK_SKEW_MS,
   MAX_LINKS,
   CONTACT_RATE_MAX,
   CONTACT_RATE_WINDOW_MS,
