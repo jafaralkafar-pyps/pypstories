@@ -77,3 +77,12 @@
   background-color: #1e40af;
   color: white;
 }
+
+/* Contact honeypot. Off-screen, not an inline style. */
+.contact-hp {
+  position: absolute;
+  left: -10000px;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+}

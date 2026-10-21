@@ -33,6 +33,11 @@
     <p class="text-sm text-slate-300 mb-8">We read every message. If you have a PYPStories account, we'll reply with an in-site notice. Log in first so we can match your message to your account.</p>
 
     <form id="contact-form" class="space-y-3 max-w-lg" method="post" action="/api/contact">
+      <div class="contact-hp" aria-hidden="true">
+        <label for="contact-website">Website</label>
+        <input id="contact-website" name="website" type="text" tabindex="-1" autocomplete="off" aria-hidden="true" value="">
+      </div>
+      <input type="hidden" id="contact-loaded-at" name="loaded_at" value="">
       <div>
         <label class="text-xs text-slate-400" for="contact-name">Name</label>
         <input id="contact-name" name="name" type="text" maxlength="80" required autocomplete="name"

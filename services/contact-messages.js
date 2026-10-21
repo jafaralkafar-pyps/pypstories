@@ -18,11 +18,19 @@ function ensureContactMessagesTable(db) {
       message TEXT NOT NULL,
       created_at TEXT DEFAULT CURRENT_TIMESTAMP,
       ip TEXT,
-      user_id INTEGER
+      user_id INTEGER,
+      flagged INTEGER DEFAULT 0,
+      flag_reason TEXT
     );
   `);
   try {
     db.exec('ALTER TABLE contact_messages ADD COLUMN user_id INTEGER');
+  } catch (err) {}
+  try {
+    db.exec('ALTER TABLE contact_messages ADD COLUMN flagged INTEGER DEFAULT 0');
+  } catch (err) {}
+  try {
+    db.exec('ALTER TABLE contact_messages ADD COLUMN flag_reason TEXT');
   } catch (err) {}
 }
 
@@ -73,12 +81,16 @@ function saveContactMessage(db, input) {
   const message = String(payload.message || '').trim().slice(0, 2000);
   const ip = payload.ip == null ? null : String(payload.ip).slice(0, 80);
   const userId = normalizeUserId(payload.userId);
+  const flagged = payload.flagged ? 1 : 0;
+  const flagReason = flagged && payload.flagReason
+    ? String(payload.flagReason).slice(0, 200)
+    : null;
   const result = db.prepare(`
-    INSERT INTO contact_messages (name, email, message, ip, user_id)
-    VALUES (?, ?, ?, ?, ?)
-  `).run(name, email, message, ip || null, userId);
+    INSERT INTO contact_messages (name, email, message, ip, user_id, flagged, flag_reason)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `).run(name, email, message, ip || null, userId, flagged, flagReason);
   return db.prepare(`
-    SELECT id, name, email, message, created_at, user_id
+    SELECT id, name, email, message, created_at, user_id, flagged, flag_reason
     FROM contact_messages WHERE id = ?
   `).get(result.lastInsertRowid);
 }
@@ -101,6 +113,8 @@ function listContactMessages(db, actor, options) {
       m.message,
       m.created_at,
       m.user_id,
+      m.flagged,
+      m.flag_reason,
       u.username AS username,
       u.email AS account_email
     FROM contact_messages m
@@ -120,6 +134,8 @@ function listContactMessages(db, actor, options) {
       created_at: row.created_at,
       created_label: formatCreatedAt(row.created_at),
       user_id: row.user_id == null ? null : row.user_id,
+      flagged: row.flagged ? 1 : 0,
+      flag_reason: row.flag_reason || null,
       username: row.username || null,
       account_email: row.account_email || null,
     })),

@@ -556,11 +556,17 @@
             const when = document.createElement('p');
             when.className = 'text-xs text-slate-500 mt-1';
             when.textContent = item.created_label || '';
+            card.appendChild(who);
+            card.appendChild(when);
+            if (item.flagged) {
+              const badge = document.createElement('p');
+              badge.className = 'mt-1 text-xs text-amber-300';
+              badge.textContent = 'Flagged: ' + (item.flag_reason || '');
+              card.appendChild(badge);
+            }
             const body = document.createElement('p');
             body.className = 'text-sm text-slate-300 whitespace-pre-line mt-2';
             body.textContent = item.message || '';
-            card.appendChild(who);
-            card.appendChild(when);
             card.appendChild(body);
             if (item.user_id && item.username) {
               const button = document.createElement('button');

@@ -1,5 +1,12 @@
 // Loaded from /js so production CSP script-src 'self' can run it.
 var accountPrefill = null;
+var loadedAtMs = Date.now();
+var loadedAtField = document.getElementById('contact-loaded-at');
+
+function stampLoadedAt() {
+  if (loadedAtField) loadedAtField.value = String(loadedAtMs);
+}
+stampLoadedAt();
 
 function applyAccountPrefill() {
   if (!accountPrefill) return;
@@ -30,6 +37,8 @@ document.getElementById('contact-form').addEventListener('submit', function (eve
   var name = (document.getElementById('contact-name').value || '').trim();
   var email = (document.getElementById('contact-email').value || '').trim();
   var message = (document.getElementById('contact-message').value || '').trim();
+  var websiteEl = document.getElementById('contact-website');
+  var website = websiteEl ? (websiteEl.value || '') : '';
   var err = document.getElementById('contact-error');
   var ok = document.getElementById('contact-success');
   var btn = document.getElementById('contact-submit');
@@ -57,7 +66,13 @@ document.getElementById('contact-form').addEventListener('submit', function (eve
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     credentials: 'same-origin',
-    body: JSON.stringify({ name: name, email: email, message: message })
+    body: JSON.stringify({
+      name: name,
+      email: email,
+      message: message,
+      website: website,
+      loaded_at: loadedAtField ? loadedAtField.value : ''
+    })
   }).then(function (r) {
     return r.json().catch(function () { return {}; }).then(function (d) {
       return { ok: r.ok, data: d };
@@ -72,6 +87,7 @@ document.getElementById('contact-form').addEventListener('submit', function (eve
     ok.classList.remove('hidden');
     document.getElementById('contact-form').reset();
     document.getElementById('contact-msg-count').textContent = '0';
+    stampLoadedAt();
     applyAccountPrefill();
   }).catch(function () {
     err.textContent = 'Network error. Please try again.';

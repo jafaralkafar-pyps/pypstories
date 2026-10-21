@@ -10,6 +10,7 @@ const path = require('path');
 const express = require('express');
 const Database = require('better-sqlite3');
 const contactMessages = require('./contact-messages');
+const contactGuard = require('./contact-guard');
 
 const publicDir = path.join(__dirname, '..', 'public');
 const REPLY = 'We read every message. If you have a PYPStories account, we\'ll reply with an in-site notice. Log in first so we can match your message to your account.';
@@ -42,6 +43,48 @@ function listen(app) {
   return new Promise((resolve) => {
     const server = app.listen(0, '127.0.0.1', () => resolve(server));
   });
+}
+
+function postJson(server, urlPath, headers) {
+  return new Promise((resolve, reject) => {
+    const address = server.address();
+    const req = http.request({
+      host: '127.0.0.1',
+      port: address.port,
+      method: 'POST',
+      path: urlPath,
+      headers: Object.assign({
+        'content-type': 'application/json',
+        'content-length': '2',
+      }, headers || {}),
+    }, (res) => {
+      const chunks = [];
+      res.on('data', (chunk) => chunks.push(chunk));
+      res.on('end', () => {
+        const body = Buffer.concat(chunks).toString('utf8');
+        let json = null;
+        try { json = JSON.parse(body); } catch (err) { json = null; }
+        resolve({ status: res.statusCode, body, json });
+      });
+    });
+    req.on('error', reject);
+    req.end('{}');
+  });
+}
+
+function mockRes() {
+  return {
+    statusCode: 200,
+    payload: null,
+    status(code) {
+      this.statusCode = code;
+      return this;
+    },
+    json(body) {
+      this.payload = body;
+      return this;
+    },
+  };
 }
 
 function request(server, urlPath, user) {
@@ -81,7 +124,11 @@ async function main() {
   contactMessages.ensureContactMessagesTable(fresh);
   const cols = fresh.prepare('PRAGMA table_info(contact_messages)').all().map((col) => col.name);
   assert.ok(cols.includes('user_id'));
+  assert.ok(cols.includes('flagged'));
+  assert.ok(cols.includes('flag_reason'));
   assert.strictEqual(cols.filter((name) => name === 'user_id').length, 1);
+  assert.strictEqual(cols.filter((name) => name === 'flagged').length, 1);
+  assert.strictEqual(cols.filter((name) => name === 'flag_reason').length, 1);
   fresh.close();
 
   const db = buildDb();
@@ -94,6 +141,8 @@ async function main() {
     userId: 2,
   });
   assert.strictEqual(loggedIn.user_id, 2);
+  assert.strictEqual(loggedIn.flagged, 0);
+  assert.strictEqual(loggedIn.flag_reason, null);
 
   const loggedOut = contactMessages.saveContactMessage(db, {
     name: 'Guest',
@@ -270,6 +319,13 @@ async function main() {
     assert.ok(contact.body.includes('action="/api/contact"'));
     assert.ok(contact.body.includes('src="/js/contact.js"'));
     assert.ok(!/we reply by email/i.test(contact.body));
+    assert.ok(contact.body.includes('name="website"'));
+    assert.ok(contact.body.includes('class="contact-hp"'));
+    assert.ok(contact.body.includes('tabindex="-1"'));
+    assert.ok(contact.body.includes('autocomplete="off"'));
+    assert.ok(contact.body.includes('aria-hidden="true"'));
+    assert.ok(contact.body.includes('name="loaded_at"'));
+    assert.ok(!contact.body.includes('style="'));
 
     const privacy = await request(server, '/privacy.html');
     assert.ok(privacy.body.includes('href="/contact.html">contact form</a>'));
@@ -280,6 +336,132 @@ async function main() {
   } finally {
     await new Promise((resolve) => server.close(resolve));
     db.close();
+  }
+
+  const spamDb = new Database(':memory:');
+  spamDb.exec(`
+    CREATE TABLE users (
+      id INTEGER PRIMARY KEY,
+      username TEXT,
+      email TEXT,
+      role TEXT
+    );
+  `);
+  contactMessages.ensureContactMessagesTable(spamDb);
+  const now = 1700000000000;
+  const sent = [];
+  const sendEmail = async (to, subject, html) => {
+    sent.push({ to, subject, html });
+  };
+  const base = {
+    name: 'Ada',
+    email: 'ada@example.com',
+    message: 'I would like to update the name on my stories.',
+    website: '',
+    loaded_at: String(now - contactGuard.MIN_FILL_MS),
+  };
+  async function submit(overrides) {
+    const res = mockRes();
+    await contactGuard.handleContactPost(
+      { body: Object.assign({}, base, overrides || {}), ip: '203.0.113.9', headers: {} },
+      res,
+      { db: spamDb, userId: null, to: 'ops@example.com', sendEmail, now }
+    );
+    return res;
+  }
+  function latest() {
+    return spamDb.prepare('SELECT * FROM contact_messages ORDER BY id DESC LIMIT 1').get();
+  }
+  const beforeDrop = spamDb.prepare('SELECT COUNT(*) AS n FROM contact_messages').get().n;
+
+  const honey = await submit({
+    website: 'http://spam.example',
+    message: 'x',
+    loaded_at: String(now),
+  });
+  assert.strictEqual(honey.statusCode, 200);
+  assert.strictEqual(honey.payload.success, true);
+  assert.strictEqual(honey.payload.message, contactMessages.CONTACT_SUCCESS);
+  assert.strictEqual(spamDb.prepare('SELECT COUNT(*) AS n FROM contact_messages').get().n, beforeDrop);
+  assert.strictEqual(sent.length, 0);
+
+  const fast = await submit({ loaded_at: String(now - (contactGuard.MIN_FILL_MS - 1)) });
+  assert.strictEqual(fast.payload.success, true);
+  assert.strictEqual(latest().flagged, 1);
+  assert.strictEqual(latest().flag_reason, contactGuard.FLAG_FAST);
+  assert.strictEqual(sent.length, 0);
+
+  const missing = await submit({ loaded_at: '' });
+  assert.strictEqual(latest().flagged, 1);
+  assert.strictEqual(latest().flag_reason, contactGuard.FLAG_MISSING);
+  assert.strictEqual(sent.length, 0);
+
+  const linked = await submit({
+    message: 'See http://a.test and https://b.test and www.c.test today.',
+  });
+  assert.strictEqual(latest().flagged, 1);
+  assert.strictEqual(latest().flag_reason, contactGuard.FLAG_LINKS);
+  assert.strictEqual(sent.length, 0);
+  assert.strictEqual(
+    contactGuard.countContactLinks('https://www.example.com and https://www.pypstories.com'),
+    2
+  );
+
+  const twoLinks = await submit({
+    message: 'See https://www.example.com and https://www.example.org today.',
+  });
+  assert.strictEqual(twoLinks.payload.success, true);
+  assert.strictEqual(latest().flagged, 0);
+  assert.strictEqual(latest().flag_reason, null);
+  assert.strictEqual(sent.length, 1);
+
+  const clean = await submit({ user_id: 99 });
+  assert.strictEqual(clean.payload.message, contactMessages.CONTACT_SUCCESS);
+  assert.strictEqual(latest().flagged, 0);
+  assert.strictEqual(latest().user_id, null);
+  assert.strictEqual(sent.length, 2);
+  assert.strictEqual(sent[1].to, 'ops@example.com');
+  assert.ok(sent[1].subject.includes('Ada'));
+  assert.ok(sent[1].html.includes('I would like to update the name on my stories.'));
+  assert.ok(sent[1].html.includes('mailto:ada@example.com'));
+
+  const both = await submit({
+    loaded_at: String(now - 500),
+    message: 'See http://a.test and https://b.test and www.c.test today.',
+  });
+  assert.strictEqual(both.payload.success, true);
+  assert.ok(latest().flag_reason.includes(contactGuard.FLAG_FAST));
+  assert.ok(latest().flag_reason.includes(contactGuard.FLAG_LINKS));
+  assert.strictEqual(sent.length, 2);
+
+  const flaggedList = contactMessages.listContactMessages(spamDb, { id: 4, role: 'admin' });
+  const fastRow = flaggedList.messages.find((row) => row.flag_reason === contactGuard.FLAG_FAST);
+  assert.ok(fastRow);
+  assert.strictEqual(fastRow.flagged, 1);
+  assert.strictEqual(Object.prototype.hasOwnProperty.call(fastRow, 'ip'), false);
+  spamDb.close();
+
+  const limitApp = express();
+  limitApp.set('trust proxy', 1);
+  limitApp.post('/api/contact', contactGuard.createContactLimiter(), (req, res) => {
+    res.json({ ok: true, ip: req.ip });
+  });
+  const limitServer = await listen(limitApp);
+  try {
+    const forwarded = { 'x-forwarded-for': '198.51.100.20' };
+    for (let i = 0; i < contactGuard.CONTACT_RATE_MAX; i++) {
+      const ok = await postJson(limitServer, '/api/contact', forwarded);
+      assert.strictEqual(ok.status, 200, 'post ' + i);
+      assert.strictEqual(ok.json.ip, '198.51.100.20');
+    }
+    const blocked = await postJson(limitServer, '/api/contact', forwarded);
+    assert.strictEqual(blocked.status, 429);
+    assert.strictEqual(blocked.json.error, contactGuard.CONTACT_RATE_MESSAGE);
+    const other = await postJson(limitServer, '/api/contact', { 'x-forwarded-for': '198.51.100.21' });
+    assert.strictEqual(other.status, 200);
+    assert.strictEqual(other.json.ip, '198.51.100.21');
+  } finally {
+    await new Promise((resolve) => limitServer.close(resolve));
   }
 
   assert.ok(contactMessages.CONTACT_SUCCESS.includes('in-site notice'));
@@ -293,7 +475,10 @@ async function main() {
   assert.ok(route.includes('contactMessages.handleList'));
   assert.ok(serverSrc.includes('userId: sender ? sender.id : null'));
   assert.ok(!serverSrc.includes('req.body.user_id'));
-  assert.ok(serverSrc.includes('contactMessages.CONTACT_SUCCESS'));
+  assert.ok(serverSrc.includes('contactGuard.handleContactPost'));
+  assert.ok(serverSrc.includes('contactGuard.createContactLimiter'));
+  assert.ok(serverSrc.includes("app.set('trust proxy', 1)"));
+  assert.ok(!serverSrc.includes('max: 8'));
   assert.ok(!/get back to you by email/i.test(serverSrc));
   assert.strictEqual(serverSrc.match(/ensureContactMessagesTable/g).length, 1);
 
@@ -327,12 +512,31 @@ async function main() {
   assert.ok(appSrc.includes("'/api/admin/contact-messages'"));
   assert.ok(appSrc.includes('?before='));
   assert.ok(appSrc.includes('item.created_label'));
+  assert.ok(appSrc.includes("'Flagged: ' + (item.flag_reason || '')"));
+
+  const guardSrc = fs.readFileSync(path.join(__dirname, 'contact-guard.js'), 'utf8');
+  assert.ok(guardSrc.includes('contactMessages.CONTACT_SUCCESS'));
+  assert.ok(guardSrc.includes('FLAG_FAST'));
+  assert.ok(guardSrc.includes('FLAG_LINKS'));
+  assert.ok(!/nodemailer|require\('\.\/mail'\)|require\('\.\.\/server/.test(guardSrc));
+  assert.ok(!guardSrc.includes('ensureContactMessagesTable'));
+
+  const inputCss = fs.readFileSync(path.join(publicDir, 'css', 'input.css'), 'utf8');
+  const builtCss = fs.readFileSync(path.join(publicDir, 'css', 'tailwind.css'), 'utf8');
+  assert.ok(inputCss.includes('.contact-hp'));
+  assert.ok(inputCss.includes('left: -10000px'));
+  assert.ok(builtCss.includes('.contact-hp'));
+  assert.ok(builtCss.includes('left:-10000px') || builtCss.includes('left: -10000px'));
 
   const contactJs = fs.readFileSync(path.join(publicDir, 'js', 'contact.js'), 'utf8');
   assert.ok(contactJs.includes("fetch('/api/me'"));
   assert.ok(contactJs.includes('contact-name'));
   assert.ok(contactJs.includes('contact-email'));
   assert.ok(contactJs.includes('applyAccountPrefill'));
+  assert.ok(contactJs.includes('Date.now()'));
+  assert.ok(contactJs.includes('stampLoadedAt'));
+  assert.ok(contactJs.includes('loaded_at'));
+  assert.ok(contactJs.includes('website'));
 
   console.log('ALL PASS');
 }

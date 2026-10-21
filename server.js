@@ -12,6 +12,7 @@ const credits = require('./services/credits');
 const offlineDownload = require('./services/offline-download');
 const notifications = require('./services/notifications');
 const contactMessages = require('./services/contact-messages');
+const contactGuard = require('./services/contact-guard');
 const { bareHostRedirect } = require('./services/bare-host-redirect');
 const publicPages = require('./services/public-pages');
 const readAccess = require('./services/read-access');
@@ -122,13 +123,8 @@ const authLimiter = rateLimit({
   legacyHeaders: false,
 });
 
-const contactLimiter = rateLimit({
-  windowMs: 60 * 60 * 1000, // 1 hour
-  max: 8,
-  message: { error: 'Too many contact messages. Please try again later.' },
-  standardHeaders: true,
-  legacyHeaders: false,
-});
+// Five posts per IP per hour. req.ip follows trust proxy above (set to 1, not true).
+const contactLimiter = contactGuard.createContactLimiter();
 
 const adminNotifyLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -1787,80 +1783,19 @@ app.post('/api/notifications/:id/read', requireAuth, (req, res) => {
   }
 });
 
-// Footer contact form
-app.post('/api/contact', contactLimiter, async (req, res) => {
-  const name = String(req.body.name || '').trim().slice(0, 80);
-  const email = String(req.body.email || '').trim().toLowerCase().slice(0, 120);
-  const message = String(req.body.message || '').trim().slice(0, 2000);
-
-  if (!name || name.length < 2) {
-    return res.status(400).json({ error: 'Please enter your name' });
-  }
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-    return res.status(400).json({ error: 'Please enter a valid email address' });
-  }
-  const textCheck = validatePublicText(message, {
-    field: 'Message',
-    minLen: 10,
-    maxLen: 2000,
-  });
-  if (!textCheck.ok) {
-    return res.status(400).json({ error: textCheck.error });
-  }
-
-  const ip = String(req.ip || req.headers['x-forwarded-for'] || '').slice(0, 80);
+// Footer contact form. Spam checks live in contact-guard; this passes the session user.
+app.post('/api/contact', contactLimiter, (req, res) => {
   const sender = getCurrentUser(req);
-
-  try {
-    contactMessages.saveContactMessage(db, {
-      name,
-      email,
-      message,
-      ip,
-      userId: sender ? sender.id : null,
-    });
-  } catch (e) {
-    console.error('Contact save failed:', e);
-    return res.status(500).json({ error: 'Could not save your message. Please try again.' });
-  }
-
-  const to =
-    (process.env.CONTACT_EMAIL || '').trim() ||
-    (process.env.EMAIL_FROM || '').match(/[\w.+-]+@[\w.-]+\.\w+/)?.[0] ||
-    '';
-
-  if (to) {
-    try {
-      const safeName = name.replace(/[<>&]/g, '');
-      const safeEmail = email.replace(/[<>&]/g, '');
-      const safeMsg = message
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/\n/g, '<br>');
-      await sendEmail(
-        to,
-        `[PYPStories contact] from ${safeName}`,
-        `
-        <div style="font-family:system-ui,sans-serif;max-width:560px;margin:0 auto;padding:16px;">
-          <h2>New contact message</h2>
-          <p><strong>Name:</strong> ${safeName}</p>
-          <p><strong>Email:</strong> <a href="mailto:${safeEmail}">${safeEmail}</a></p>
-          <p><strong>Message:</strong></p>
-          <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px;">${safeMsg}</div>
-        </div>
-        `
-      );
-    } catch (e) {
-      console.error('Contact email failed (message still saved):', e.message || e);
+  contactGuard.handleContactPost(req, res, {
+    db,
+    userId: sender ? sender.id : null,
+    ip: String(req.ip || req.headers['x-forwarded-for'] || '').slice(0, 80),
+    sendEmail,
+  }).catch((err) => {
+    console.error('Contact handler failed:', err);
+    if (!res.headersSent) {
+      res.status(500).json({ error: 'Could not save your message. Please try again.' });
     }
-  } else {
-    console.warn('CONTACT_EMAIL / EMAIL_FROM not set — contact message saved to DB only');
-  }
-
-  res.json({
-    success: true,
-    message: contactMessages.CONTACT_SUCCESS,
   });
 });
 
